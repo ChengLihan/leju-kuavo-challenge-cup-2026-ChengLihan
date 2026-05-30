@@ -646,6 +646,7 @@ protected:
     std::unique_ptr<unsigned char[]> rgb(new unsigned char[3 * total]);
     std::unique_ptr<float[]>         depth_buffer(new float[total]);
     mjr_readPixels(rgb.get(), depth_buffer.get(), viewport, &ctx_);
+    const ros::Time frame_stamp = ros::Time::now();
 
     // 重要：mjModel.vis.map.znear/zfar 是相对值，实际近/远裁剪面 = znear/zfar * stat.extent
     // 见 mjmodel.h: "near clipping plane = znear * mjModel.stat.extent"。
@@ -693,7 +694,7 @@ protected:
     hdr.depthParam[1] = 0.f;
 
     sensor_msgs::CompressedImage depth_msg;
-    depth_msg.header.stamp = ros::Time::now();
+    depth_msg.header.stamp = frame_stamp;
     depth_msg.header.frame_id = GetWindowName();
     // ROS 标准格式：16UC1（mm）+ compressedDepth png；不再附 znear/zfar，下游按毫米直接使用
     depth_msg.format = "16UC1; compressedDepth png";
@@ -713,7 +714,7 @@ protected:
     cv::imencode(".png", image, buffer);
 
     sensor_msgs::CompressedImage img_msg;
-    img_msg.header.stamp = ros::Time::now();
+    img_msg.header.stamp = frame_stamp;
     img_msg.header.frame_id = GetWindowName();
     img_msg.format = "bgr8; png compressed bgr8";
     img_msg.data = buffer;

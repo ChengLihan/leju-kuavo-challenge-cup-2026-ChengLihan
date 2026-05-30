@@ -831,15 +831,17 @@ class SceneBuilder:
         xy_offset = float(shuffle_cfg.get("xy_offset", 0.0)) if isinstance(shuffle_cfg, dict) else 0.0
         objects = config.get("objects", [])
         by_name = {obj.get("name"): obj for obj in objects if obj.get("name")}
+        orientation_keys = ("quat", "euler", "axisangle", "xyaxes", "zaxis")
         positions = []
         for name in names:
             obj = by_name.get(name)
             if obj:
                 x, y, _ = self._float_list(obj.get("pos", "0 0 0"), 3)
-                positions.append((x, y, obj.get("euler")))
+                orientation = {key: obj[key] for key in orientation_keys if key in obj}
+                positions.append((x, y, orientation))
         rng = random.Random(seed)
         rng.shuffle(positions)
-        for name, (x, y, euler) in zip(names, positions):
+        for name, (x, y, orientation) in zip(names, positions):
             obj = by_name.get(name)
             if not obj:
                 continue
@@ -847,8 +849,9 @@ class SceneBuilder:
             x += rng.uniform(-xy_offset, xy_offset)
             y += rng.uniform(-xy_offset, xy_offset)
             obj["pos"] = f"{x:.3f} {y:.3f} {z:.3f}"
-            if euler is not None:
-                obj["euler"] = euler
+            for key in orientation_keys:
+                obj.pop(key, None)
+            obj.update(orientation)
 
     @staticmethod
     def _deep_merge(base, override):

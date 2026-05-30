@@ -70,3 +70,10 @@ src/legged_perceptive
 *.csv
 EC_log/
 .catkin_tools/
+
+# challenge_cup_task_template 一键启动生成的临时场景 XML
+src/challenge_cup_simulator/models/biped_s52/xml/_scene_*_seed_*.xml
+
+# challenge_secret 机密源码：选手分发仓库不提交，仅分发编译后的
+# challenge_cup_simulator/lib/challenge_secret*.so（组委会单独保存源码）
+src/challenge_secret/
