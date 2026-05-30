@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect scene2 data with one fixed IK grasp attempt for the nylon fitting."""
+"""Collect scene2 data with fixed absolute pick/place attempts for nylon fittings."""
 
 import argparse
 import datetime as _datetime
@@ -16,7 +16,6 @@ import time
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 SCENE_NAME = "scene2"
-TARGET_OBJECT = "part_type_b_1"
 TARGET_OBJECT_ALIAS = "nylon_water_pipe_fitting"
 TARGET_BIN = "sorting_bin_b"
 DEFAULT_OUTPUT_DIR = os.path.join(REPO_ROOT, "bags", SCENE_NAME)
@@ -43,29 +42,56 @@ PREGRASP_POINTS_DEG = [
     [0, 0, 0, -30, 0, 0, 0, 22, -6, 18, -125, 88, 8, 0],
 ]
 
-# Fixed scene2 grasp pose read from live FK after manual adjustment.
-FIXED_RIGHT_HAND_TARGET_XYZ = [0.301627, -0.041467, -0.084687]
-RIGHT_HAND_QUAT_XYZW = [-0.173916, -0.389729, 0.887919, 0.171654]
+FIXED_RIGHT_HAND_TARGET_XYZ = [0.285966, -0.083886, -0.093783]
+SECOND_RIGHT_HAND_TARGET_XYZ = [0.285966, 0.016114, -0.093783]
+BIN_B_PLACE_TARGETS_XYZ = [
+    [0.565486, -0.013608, 0.174811],
+    [0.565486, 0.026392, 0.174811],
+]
+RIGHT_HAND_QUAT_XYZW = [-0.081987, -0.152343, 0.857876, 0.483858]
+LIFT_Z_OFFSET = 0.060
+PLACE_DWELL = 0.8
 
 HEAD_TARGET = [0.0, 20.0]
 HEAD_SETTLE_TIME = 0.8
 ARM_MODE_EXTERNAL_CONTROL = 2
 ARM_MODE_AUTO_SWING = 1
 ARM_MODE_SERVICE = "/arm_traj_change_mode"
-# 与可用的 keyboard 脚本对齐：经 /kuavo_arm_target_poses -> humanoid_Arm_time_target_control
-# -> /humanoid_mpc_target_arm 进入 OCS2 MPC，是本控制器真正驱动手臂的路径；
-# 直接发 /kuavo_arm_traj 不走 MPC，执行不稳定。
 ARM_TARGET_POSES_TOPIC = "/kuavo_arm_target_poses"
-ARM_MOVE_TIME = 4.0       # 每个航点由 MPC 在该时间内平滑插值到位（秒）
-ARM_SETTLE_TIME = 0.5     # 到位后额外稳定时间（秒）
-REACH_TOLERANCE = 0.03    # FK 验证：右手末端与目标的允许误差（米）
+ARM_MOVE_TIME = 2.0
+ARM_SETTLE_TIME = 0.3
+ORIENTATION_TOLERANCE_RAD = math.radians(20.0)
+GRASP_POSITION_TOLERANCE = 0.012
+IK_MODE_POS_HARD_ORI_SOFT = 0x02
+IK_MODE_THREE_POINT_MIXED = 0x06
+THREE_POINT_WEIGHT = 2.0
+FAST_GRASP_SETTLE_HOLD = 2.0
+GRIPPER_CLOSE_TIME = 1.0
 RECORD_SETTLE_TIME = 2.0
-RUN_COOLDOWN = 2.0
+POST_ARM_MODE_RECORD_TIME = 1.0
 TOPIC_TIMEOUT = 20.0
 LAUNCH_TIMEOUT = 120.0
 BAG_PREFIX = "dataset"
 RIGHT_GRIPPER_OPEN = 0.0
 LEFT_GRIPPER_OPEN = 0.0
+RIGHT_GRIPPER_CLOSE = 255.0
+
+PICK_PLACE_JOBS = [
+    {
+        "object": "part_type_b_1",
+        "alias": TARGET_OBJECT_ALIAS,
+        "grasp": FIXED_RIGHT_HAND_TARGET_XYZ,
+        "place": BIN_B_PLACE_TARGETS_XYZ[0],
+        "bin": TARGET_BIN,
+    },
+    {
+        "object": "part_type_b_2",
+        "alias": TARGET_OBJECT_ALIAS,
+        "grasp": SECOND_RIGHT_HAND_TARGET_XYZ,
+        "place": BIN_B_PLACE_TARGETS_XYZ[1],
+        "bin": TARGET_BIN,
+    },
+]
 
 
 def _now_tag():
@@ -101,13 +127,40 @@ def _scene_file_path():
     )
 
 
-def _load_challenge_launcher():
-    utils_dir = os.path.join(_sim_pkg_path(), "utils")
-    if utils_dir not in sys.path:
-        sys.path.insert(0, utils_dir)
-    from challenge_sim_launcher import ChallengeSimLauncher
+def _start_scene_launch(log_path):
+    log_file = open(log_path, "w")
+    cmd = [
+        "roslaunch",
+        "challenge_cup_simulator",
+        "load_kuavo_mujoco_challenge.launch",
+        f"scene_name:={SCENE_NAME}",
+    ]
+    proc = subprocess.Popen(
+        cmd,
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+        preexec_fn=os.setsid,
+    )
+    return proc, log_file, cmd
 
-    return ChallengeSimLauncher
+
+def _wait_for_roscore(proc, timeout):
+    import xmlrpc.client
+
+    master_uri = os.environ.get("ROS_MASTER_URI", "http://localhost:11311")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if proc is not None and proc.poll() is not None:
+            raise RuntimeError(f"roslaunch exited early with code {proc.returncode}")
+        try:
+            master = xmlrpc.client.ServerProxy(master_uri)
+            code, _message, _state = master.getSystemState("/scene2_dataset_collector_wait")
+            if code == 1:
+                return
+        except Exception:
+            pass
+        time.sleep(0.3)
+    raise RuntimeError(f"roscore did not become ready within {timeout:.1f}s")
 
 
 def _init_ros_node(node_name):
@@ -153,17 +206,6 @@ def _wait_for_topics(topics, timeout):
     return missing
 
 
-def _right_hand_target():
-    import rospy
-
-    rospy.loginfo(
-        "scene2 dataset: %s fixed hand_target=%s",
-        TARGET_OBJECT,
-        ["%.4f" % v for v in FIXED_RIGHT_HAND_TARGET_XYZ],
-    )
-    return list(FIXED_RIGHT_HAND_TARGET_XYZ)
-
-
 def _wait_for_connection(pub, timeout):
     import rospy
 
@@ -205,24 +247,30 @@ def _publish_head_target(timeout):
     rospy.sleep(HEAD_SETTLE_TIME)
 
 
-def _publish_gripper_open(pub):
+def _publish_gripper(pub, left_cmd, right_cmd, repeats=12, dt=0.05):
     import rospy
     from sensor_msgs.msg import JointState
 
-    for _ in range(12):
+    for _ in range(repeats):
         if rospy.is_shutdown():
             break
         msg = JointState()
         msg.header.stamp = rospy.Time.now()
         msg.name = ["left_gripper_joint", "right_gripper_joint"]
-        msg.position = [LEFT_GRIPPER_OPEN, RIGHT_GRIPPER_OPEN]
+        msg.position = [float(left_cmd), float(right_cmd)]
         pub.publish(msg)
-        rospy.sleep(0.05)
+        rospy.sleep(dt)
+
+
+def _publish_gripper_open(pub):
+    _publish_gripper(pub, LEFT_GRIPPER_OPEN, RIGHT_GRIPPER_OPEN)
+
+
+def _publish_right_gripper_close(pub):
+    _publish_gripper(pub, LEFT_GRIPPER_OPEN, RIGHT_GRIPPER_CLOSE, repeats=20)
 
 
 def _publish_arm_target_poses(pub, degrees_list, move_time):
-    """发布 armTargetPoses（与 keyboard 脚本一致）：values 为 14 个关节角(度)，
-    times=[move_time] 表示在 move_time 秒内由 MPC 平滑插值到位。"""
     from kuavo_msgs.msg import armTargetPoses
 
     msg = armTargetPoses()
@@ -238,19 +286,22 @@ def _move_arm_to(pub, degrees_list, move_time=ARM_MOVE_TIME, settle=ARM_SETTLE_T
     rospy.sleep(move_time + settle)
 
 
-def _verify_right_hand_reach(target_xyz, timeout):
-    """发布后用当前关节做 FK，验证右手末端是否真的到达目标，返回 (误差m, 实际xyz)。"""
-    import rospy
+def _measure_right_pose(timeout):
+    q = _read_current_arm_joints(timeout)
+    pose = _call_fk(q, timeout).right_pose
+    return list(pose.pos_xyz), list(pose.quat_xyzw)
 
-    current_q = _read_current_arm_joints(timeout)
-    poses = _call_fk(current_q, timeout)
-    actual = list(poses.right_pose.pos_xyz)
-    err = math.sqrt(sum((a - b) ** 2 for a, b in zip(actual, target_xyz)))
-    rospy.loginfo(
-        "scene2 dataset: FK reach check target=%s actual=%s err=%.4f m",
-        [round(v, 4) for v in target_xyz], [round(v, 4) for v in actual], err,
+
+def _axis_error(actual, desired, axes):
+    return math.sqrt(
+        sum((actual[i] - desired[i]) ** 2 for i, enabled in enumerate(axes) if enabled)
     )
-    return err, actual
+
+
+def _quat_angle_error(actual_xyzw, desired_xyzw):
+    dot = sum(float(actual_xyzw[i]) * float(desired_xyzw[i]) for i in range(4))
+    dot = max(-1.0, min(1.0, abs(dot)))
+    return 2.0 * math.acos(dot)
 
 
 def _rad_to_deg(point):
@@ -270,18 +321,18 @@ def _read_current_arm_joints(timeout):
     raise RuntimeError(f"/sensors_data_raw joint_q has {len(joint_q)} values")
 
 
-def _make_ik_param():
+def _make_ik_param(constraint_mode=IK_MODE_POS_HARD_ORI_SOFT, pos_cost_weight=0.0):
     from kuavo_msgs.msg import ikSolveParam
 
     param = ikSolveParam()
     param.major_optimality_tol = 1e-3
     param.major_feasibility_tol = 1e-3
     param.minor_feasibility_tol = 1e-3
-    param.major_iterations_limit = 100
+    param.major_iterations_limit = 500
     param.oritation_constraint_tol = 1e-3
     param.pos_constraint_tol = 1e-3
-    param.pos_cost_weight = 1.0
-    param.constraint_mode = 0x06
+    param.pos_cost_weight = float(pos_cost_weight)
+    param.constraint_mode = constraint_mode
     return param
 
 
@@ -296,7 +347,14 @@ def _call_fk(joint_angles, timeout):
     return response.hand_poses
 
 
-def _call_right_hand_ik(current_joint_values, right_pos, timeout):
+def _call_right_hand_ik(
+    current_joint_values,
+    right_pos,
+    timeout,
+    desired_quat=None,
+    constraint_mode=IK_MODE_POS_HARD_ORI_SOFT,
+    pos_cost_weight=0.0,
+):
     import rospy
     from kuavo_msgs.msg import twoArmHandPoseCmd
     from kuavo_msgs.srv import twoArmHandPoseCmdSrv
@@ -305,7 +363,10 @@ def _call_right_hand_ik(current_joint_values, right_pos, timeout):
     request = twoArmHandPoseCmd()
     request.use_custom_ik_param = True
     request.joint_angles_as_q0 = True
-    request.ik_param = _make_ik_param()
+    request.ik_param = _make_ik_param(
+        constraint_mode=constraint_mode,
+        pos_cost_weight=pos_cost_weight,
+    )
     request.hand_poses.left_pose.joint_angles = list(current_joint_values[:7])
     request.hand_poses.right_pose.joint_angles = list(current_joint_values[7:])
     request.hand_poses.left_pose.elbow_pos_xyz = [0.0, 0.0, 0.0]
@@ -313,7 +374,9 @@ def _call_right_hand_ik(current_joint_values, right_pos, timeout):
     request.hand_poses.left_pose.pos_xyz = list(fk_poses.left_pose.pos_xyz)
     request.hand_poses.left_pose.quat_xyzw = list(fk_poses.left_pose.quat_xyzw)
     request.hand_poses.right_pose.pos_xyz = list(right_pos)
-    request.hand_poses.right_pose.quat_xyzw = list(RIGHT_HAND_QUAT_XYZW)
+    request.hand_poses.right_pose.quat_xyzw = (
+        list(desired_quat) if desired_quat is not None else list(fk_poses.right_pose.quat_xyzw)
+    )
 
     rospy.wait_for_service("/ik/two_arm_hand_pose_cmd_srv", timeout=timeout)
     response = rospy.ServiceProxy("/ik/two_arm_hand_pose_cmd_srv", twoArmHandPoseCmdSrv)(request)
@@ -321,6 +384,7 @@ def _call_right_hand_ik(current_joint_values, right_pos, timeout):
         raise RuntimeError(
             "/ik/two_arm_hand_pose_cmd_srv failed: "
             + getattr(response, "error_reason", "")
+            + f" target={list(right_pos)} constraint_mode={constraint_mode} desired_quat={desired_quat}"
         )
 
     right_result = list(response.hand_poses.right_pose.joint_angles)
@@ -331,7 +395,171 @@ def _call_right_hand_ik(current_joint_values, right_pos, timeout):
     raise RuntimeError("IK response did not contain arm joints")
 
 
-def _run_fixed_grasp_motion(scene_file):
+def _move_right_hand_ik_once(
+    pub,
+    right_pos,
+    right_quat,
+    timeout,
+    label,
+    constraint_mode=IK_MODE_THREE_POINT_MIXED,
+    pos_cost_weight=0.0,
+    move_time=ARM_MOVE_TIME,
+    settle_time=FAST_GRASP_SETTLE_HOLD,
+):
+    import rospy
+
+    current = _read_current_arm_joints(timeout)
+    ik_q = _call_right_hand_ik(
+        current,
+        right_pos,
+        timeout,
+        desired_quat=right_quat,
+        constraint_mode=constraint_mode,
+        pos_cost_weight=pos_cost_weight,
+    )
+    cmd14 = _rad_to_deg(ik_q)
+    _publish_arm_target_poses(pub, cmd14, move_time)
+    rospy.sleep(move_time + settle_time)
+
+    actual, actual_quat = _measure_right_pose(timeout)
+    pos_err = _axis_error(actual, right_pos, (True, True, True))
+    quat_err = _quat_angle_error(actual_quat, right_quat) if right_quat is not None else None
+    rospy.loginfo(
+        "scene2 dataset: %s one-shot IK actual=%s pos_err=%.4f m quat_err=%s",
+        label,
+        [round(v, 4) for v in actual],
+        pos_err,
+        "%.1fdeg" % math.degrees(quat_err) if quat_err is not None else "n/a",
+    )
+    return pos_err, quat_err, actual, actual_quat, cmd14
+
+
+def _pick_part_absolute(arm_pub, gripper_pub, job, hold_time):
+    import rospy
+
+    grasp_target = list(job["grasp"])
+    rospy.loginfo(
+        "scene2 dataset: %s grasp target=%s",
+        job["object"],
+        [round(v, 4) for v in grasp_target],
+    )
+    pos_err, quat_err, actual, actual_quat, _cmd14 = _move_right_hand_ik_once(
+        arm_pub,
+        grasp_target,
+        RIGHT_HAND_QUAT_XYZW,
+        TOPIC_TIMEOUT,
+        f"{job['object']}_grasp",
+        constraint_mode=IK_MODE_THREE_POINT_MIXED,
+        pos_cost_weight=THREE_POINT_WEIGHT,
+        move_time=ARM_MOVE_TIME,
+        settle_time=hold_time,
+    )
+    if pos_err > GRASP_POSITION_TOLERANCE or quat_err > ORIENTATION_TOLERANCE_RAD:
+        rospy.logwarn(
+            "scene2 dataset: %s 抓取姿态未达到精度 (xyz_err=%.4f m / %.4f m, quat_err=%.1fdeg / %.1fdeg)",
+            job["object"],
+            pos_err,
+            GRASP_POSITION_TOLERANCE,
+            math.degrees(quat_err),
+            math.degrees(ORIENTATION_TOLERANCE_RAD),
+        )
+    else:
+        rospy.loginfo(
+            "scene2 dataset: %s 抓取姿态到位 xyz_err=%.4f m quat_err=%.1fdeg，闭合右夹爪",
+            job["object"],
+            pos_err,
+            math.degrees(quat_err),
+        )
+
+    _publish_right_gripper_close(gripper_pub)
+    rospy.sleep(GRIPPER_CLOSE_TIME)
+
+    lift_target = [grasp_target[0], grasp_target[1], grasp_target[2] + LIFT_Z_OFFSET]
+    lift_err, _lift_quat_err, _lift_actual, _lift_quat, _lift_cmd14 = _move_right_hand_ik_once(
+        arm_pub,
+        lift_target,
+        actual_quat,
+        TOPIC_TIMEOUT,
+        f"{job['object']}_lift",
+        constraint_mode=IK_MODE_POS_HARD_ORI_SOFT,
+        pos_cost_weight=0.0,
+        move_time=ARM_MOVE_TIME,
+        settle_time=hold_time,
+    )
+    rospy.loginfo(
+        "scene2 dataset: %s lift finished xyz_err=%.4f m",
+        job["object"],
+        lift_err,
+    )
+
+
+def _place_part_absolute(arm_pub, gripper_pub, job, hold_time):
+    import rospy
+
+    rospy.loginfo(
+        "scene2 dataset: %s move through high transport pose before placing",
+        job["object"],
+    )
+    _move_arm_to(
+        arm_pub,
+        PREGRASP_POINTS_DEG[2],
+        move_time=ARM_MOVE_TIME,
+        settle=FAST_GRASP_SETTLE_HOLD,
+    )
+
+    place_target = list(job["place"])
+    place_err, quat_err, actual, _actual_quat, _cmd14 = _move_right_hand_ik_once(
+        arm_pub,
+        place_target,
+        None,
+        TOPIC_TIMEOUT,
+        f"{job['object']}_place_{job['bin']}",
+        constraint_mode=IK_MODE_POS_HARD_ORI_SOFT,
+        pos_cost_weight=0.0,
+        move_time=ARM_MOVE_TIME,
+        settle_time=hold_time,
+    )
+    rospy.loginfo(
+        "scene2 dataset: %s place release actual=%s xyz_err=%.4f m quat_err=%s，打开右夹爪",
+        job["object"],
+        [round(v, 4) for v in actual],
+        place_err,
+        "%.1fdeg" % math.degrees(quat_err) if quat_err is not None else "n/a",
+    )
+    _publish_gripper_open(gripper_pub)
+    rospy.sleep(PLACE_DWELL)
+
+    _move_arm_to(
+        arm_pub,
+        PREGRASP_POINTS_DEG[2],
+        move_time=ARM_MOVE_TIME,
+        settle=ARM_SETTLE_TIME,
+    )
+
+
+def _run_absolute_pick_place_jobs(arm_pub, gripper_pub, jobs, hold_time):
+    import rospy
+
+    for index, job in enumerate(jobs, start=1):
+        rospy.loginfo(
+            "scene2 dataset: pick/place job %d/%d %s -> %s grasp=%s place=%s",
+            index,
+            len(jobs),
+            job["object"],
+            job["bin"],
+            [round(v, 4) for v in job["grasp"]],
+            [round(v, 4) for v in job["place"]],
+        )
+        _publish_gripper_open(gripper_pub)
+        _pick_part_absolute(arm_pub, gripper_pub, job, hold_time)
+        _place_part_absolute(arm_pub, gripper_pub, job, hold_time)
+
+
+def _motion_points():
+    return PREGRASP_POINTS_DEG[1:], [PREGRASP_POINTS_DEG[1], PREGRASP_POINTS_DEG[0]]
+
+
+def _run_fixed_grasp_motion():
     import rospy
     from sensor_msgs.msg import JointState
     from kuavo_msgs.msg import armTargetPoses
@@ -343,27 +571,19 @@ def _run_fixed_grasp_motion(scene_file):
 
     _publish_gripper_open(gripper_pub)
 
-    # 经过预抓取序列：每个航点交给 MPC 在 ARM_MOVE_TIME 内平滑插值到位
-    for point in PREGRASP_POINTS_DEG:
+    pregrasp_points, retract_points = _motion_points()
+
+    for point in pregrasp_points:
         _move_arm_to(arm_pub, point)
 
-    # 求解右手 IK 并移动到抓取位姿
-    right_target = _right_hand_target()
-    current_q = _read_current_arm_joints(TOPIC_TIMEOUT)
-    ik_q = _call_right_hand_ik(current_q, right_target, TOPIC_TIMEOUT)
-    ik_point_deg = _rad_to_deg(ik_q)
-    _move_arm_to(arm_pub, ik_point_deg)
+    _run_absolute_pick_place_jobs(
+        arm_pub,
+        gripper_pub,
+        PICK_PLACE_JOBS,
+        FAST_GRASP_SETTLE_HOLD,
+    )
 
-    # 到位后用 FK 验证末端是否真的到达目标（IK success 不代表实际到位）
-    err, _actual = _verify_right_hand_reach(right_target, TOPIC_TIMEOUT)
-    if err > REACH_TOLERANCE:
-        rospy.logwarn(
-            "scene2 dataset: right hand未到达目标 (err=%.4f m > %.4f m)",
-            err, REACH_TOLERANCE,
-        )
-
-    # 缩回预抓取序列
-    for point in reversed(PREGRASP_POINTS_DEG):
+    for point in retract_points:
         _move_arm_to(arm_pub, point)
     rospy.loginfo("scene2 dataset: retracted through pregrasp")
 
@@ -388,35 +608,57 @@ def _write_metadata(path, data):
     os.replace(tmp_path, path)
 
 
-def _run_single(args):
+def _run_once(args, run_index=1, run_total=1):
     if args.headless:
         os.environ["MUJOCO_HEADLESS"] = "1"
 
-    run_tag = f"{SCENE_NAME}_seed_{args.seed}_{_now_tag()}"
+    run_tag = f"{SCENE_NAME}_{_now_tag()}"
+    if run_total > 1:
+        run_tag += f"_run_{run_index:03d}"
     run_dir = os.path.abspath(os.path.join(args.output_dir, run_tag))
     os.makedirs(run_dir, exist_ok=True)
 
-    bag_path = os.path.join(run_dir, f"{BAG_PREFIX}_{SCENE_NAME}_seed_{args.seed}.bag")
+    bag_path = os.path.join(run_dir, f"{BAG_PREFIX}_{SCENE_NAME}.bag")
     metadata_path = os.path.join(run_dir, "metadata.json")
     topics = list(DEFAULT_TOPICS)
     scene_file = _scene_file_path()
 
     metadata = {
         "scene": SCENE_NAME,
-        "seed": args.seed,
-        "target_object": TARGET_OBJECT,
+        "run_index": run_index,
+        "run_total": run_total,
+        "use_existing_sim": args.use_existing_sim,
+        "target_object": PICK_PLACE_JOBS[0]["object"],
+        "target_objects": [job["object"] for job in PICK_PLACE_JOBS],
         "target_object_alias": TARGET_OBJECT_ALIAS,
         "target_bin": TARGET_BIN,
+        "pick_place_jobs": PICK_PLACE_JOBS,
         "fixed_right_hand_target_xyz": FIXED_RIGHT_HAND_TARGET_XYZ,
+        "second_right_hand_target_xyz": SECOND_RIGHT_HAND_TARGET_XYZ,
+        "bin_b_place_targets_xyz": BIN_B_PLACE_TARGETS_XYZ,
         "right_hand_quat_xyzw": RIGHT_HAND_QUAT_XYZW,
+        "lift_z_offset": LIFT_Z_OFFSET,
+        "place_dwell": PLACE_DWELL,
+        "ik_constraint_mode_position": IK_MODE_POS_HARD_ORI_SOFT,
+        "ik_constraint_mode_orientation": IK_MODE_THREE_POINT_MIXED,
+        "ik_constraint_mode_lift": IK_MODE_POS_HARD_ORI_SOFT,
+        "ik_three_point_weight": THREE_POINT_WEIGHT,
+        "fast_grasp_settle_hold": FAST_GRASP_SETTLE_HOLD,
+        "orientation_tolerance_rad": ORIENTATION_TOLERANCE_RAD,
+        "grasp_position_tolerance": GRASP_POSITION_TOLERANCE,
+        "ik_strategy": "two_absolute_pick_place_jobs_one_shot_ik",
+        "right_gripper_close": RIGHT_GRIPPER_CLOSE,
+        "post_arm_mode_record_time": POST_ARM_MODE_RECORD_TIME,
         "topics": topics,
         "bag_path": bag_path,
+        "roslaunch_command": None,
         "status": "starting",
         "started_at": _datetime.datetime.now().isoformat(),
     }
     _write_metadata(metadata_path, metadata)
 
-    launcher = None
+    launch_proc = None
+    launch_log = None
     bag_proc = None
     bag_log = None
     arm_mode_changed = False
@@ -428,17 +670,19 @@ def _run_single(args):
             if missing:
                 raise RuntimeError("existing simulation is not ready: " + ", ".join(missing))
         else:
-            ChallengeSimLauncher = _load_challenge_launcher()
-            launcher = ChallengeSimLauncher(scene=SCENE_NAME, seed=args.seed)
-            launcher.start(node_name="scene2_dataset_collector", timeout=LAUNCH_TIMEOUT)
-            scene_file = getattr(launcher, "_scene_file", None) or scene_file
+            launch_proc, launch_log, launch_cmd = _start_scene_launch(os.path.join(run_dir, "roslaunch.log"))
+            metadata["roslaunch_command"] = launch_cmd
+            _write_metadata(metadata_path, metadata)
+            _wait_for_roscore(launch_proc, timeout=30.0)
+            _init_ros_node("scene2_dataset_collector")
 
         metadata["scene_file"] = scene_file
         metadata["scene_file_sha256"] = _sha256_file(scene_file)
         metadata["status"] = "simulation_ready"
         _write_metadata(metadata_path, metadata)
 
-        missing_topics = _wait_for_topics(["/sensors_data_raw"], TOPIC_TIMEOUT)
+        topic_wait_timeout = TOPIC_TIMEOUT if args.use_existing_sim else LAUNCH_TIMEOUT
+        missing_topics = _wait_for_topics(["/sensors_data_raw"], topic_wait_timeout)
         if missing_topics:
             raise RuntimeError("required topics missing: " + ", ".join(missing_topics))
 
@@ -452,16 +696,14 @@ def _run_single(args):
         _write_metadata(metadata_path, metadata)
         time.sleep(1.0 + RECORD_SETTLE_TIME)
 
-        record_started = time.time()
         _publish_head_target(TOPIC_TIMEOUT)
         _set_arm_mode(ARM_MODE_EXTERNAL_CONTROL, timeout=TOPIC_TIMEOUT)
         arm_mode_changed = True
-        _run_fixed_grasp_motion(scene_file)
+        _run_fixed_grasp_motion()
         _set_arm_mode(ARM_MODE_AUTO_SWING, timeout=TOPIC_TIMEOUT)
         arm_mode_changed = False
 
-        while time.time() - record_started < args.duration:
-            time.sleep(0.2)
+        time.sleep(POST_ARM_MODE_RECORD_TIME)
         status = "success"
     finally:
         _terminate_process_group(bag_proc, signal.SIGINT, timeout=10)
@@ -472,8 +714,9 @@ def _run_single(args):
                 _set_arm_mode(ARM_MODE_AUTO_SWING, timeout=TOPIC_TIMEOUT)
             except Exception as exc:
                 print(f"[WARN] failed to restore arm mode: {exc}")
-        if launcher is not None:
-            launcher.stop()
+        _terminate_process_group(launch_proc, signal.SIGINT, timeout=20)
+        if launch_log is not None:
+            launch_log.close()
 
         metadata["finished_at"] = _datetime.datetime.now().isoformat()
         metadata["status"] = status
@@ -485,59 +728,54 @@ def _run_single(args):
     return 0 if status == "success" else 1
 
 
-def _expand_seeds(args):
-    if args.seeds:
-        return args.seeds
-    return list(range(args.seed_start, args.seed_start + args.count))
-
-
-def _child_args(args, seed):
-    child = [
+def _child_args_for_run(args, run_index, run_total):
+    child_args = [
         sys.executable,
         os.path.abspath(__file__),
-        "--single-run",
-        "--seed",
-        str(seed),
-        "--output-dir",
-        os.path.abspath(args.output_dir),
-        "--duration",
-        str(args.duration),
+        "--output-dir", args.output_dir,
+        "--duration", str(args.duration),
+        "--count", "1",
+        "--run-index", str(run_index),
+        "--run-total", str(run_total),
     ]
     if args.headless:
-        child.append("--headless")
+        child_args.append("--headless")
+    return child_args
+
+
+def _run_count(args):
+    if args.count < 1:
+        raise ValueError("--count must be >= 1")
+    if args.count == 1:
+        return _run_once(args, args.run_index, args.run_total)
     if args.use_existing_sim:
-        child.append("--use-existing-sim")
-    return child
+        raise ValueError("--count > 1 cannot be used with --use-existing-sim")
 
-
-def _run_batch(args):
-    os.makedirs(args.output_dir, exist_ok=True)
-    failures = []
-    seeds = _expand_seeds(args)
-    print(f"[INFO] scene2 dataset seeds: {seeds}")
-    for index, seed in enumerate(seeds, start=1):
-        print(f"[INFO] starting run {index}/{len(seeds)} seed={seed}")
-        result = subprocess.run(_child_args(args, seed))
+    for index in range(1, args.count + 1):
+        print(f"[INFO] scene2 dataset batch {index}/{args.count}: start")
+        result = subprocess.run(_child_args_for_run(args, index, args.count))
         if result.returncode != 0:
-            failures.append(seed)
-        if index < len(seeds):
-            time.sleep(RUN_COOLDOWN)
-    if failures:
-        print(f"[ERROR] failed seeds: {failures}")
-        return 1
+            print(
+                f"[ERROR] scene2 dataset batch {index}/{args.count} failed with code {result.returncode}",
+                file=sys.stderr,
+            )
+            return result.returncode
+        print(f"[INFO] scene2 dataset batch {index}/{args.count}: complete")
     return 0
 
 
 def build_arg_parser():
     parser = argparse.ArgumentParser(description="Collect scene2 fixed-grasp rosbag datasets.")
-    seed_group = parser.add_mutually_exclusive_group()
-    seed_group.add_argument("--seeds", type=int, nargs="+", help="Explicit seed list.")
-    seed_group.add_argument("--seed-start", type=int, default=0, help="First seed when --seeds is not set.")
-    parser.add_argument("--count", type=int, default=1, help="Number of sequential seeds to collect.")
-    parser.add_argument("--seed", type=int, default=0, help=argparse.SUPPRESS)
-    parser.add_argument("--single-run", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--count", type=int, default=1, help="Number of simulation restart-and-record cycles to run.")
+    parser.add_argument("--run-index", type=int, default=1, help=argparse.SUPPRESS)
+    parser.add_argument("--run-total", type=int, default=1, help=argparse.SUPPRESS)
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR, help="Output directory for run folders.")
-    parser.add_argument("--duration", type=float, default=20.0, help="Recording duration after arm motion starts.")
+    parser.add_argument(
+        "--duration",
+        type=float,
+        default=20.0,
+        help="Deprecated compatibility option; recording now stops 1s after arm mode is restored.",
+    )
     parser.add_argument("--headless", action="store_true", help="Set MUJOCO_HEADLESS=1 for this run.")
     parser.add_argument("--use-existing-sim", action="store_true", help="Attach to an already running scene2 simulation.")
     return parser
@@ -546,13 +784,11 @@ def build_arg_parser():
 def main():
     parser = build_arg_parser()
     args = parser.parse_args()
-    if args.count < 1:
-        parser.error("--count must be >= 1")
-    if args.duration <= 0:
-        parser.error("--duration must be > 0")
-    if args.single_run:
-        return _run_single(args)
-    return _run_batch(args)
+    try:
+        return _run_count(args)
+    except ValueError as exc:
+        parser.error(str(exc))
+        return 2
 
 
 if __name__ == "__main__":
