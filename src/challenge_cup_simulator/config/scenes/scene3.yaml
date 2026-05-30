@@ -1,0 +1,131 @@
+extends: "scene1.yaml"
+scene_name: "Challenge Cup Scene 3"
+
+# Scene 3: SMT tray outbound task. The rack and charging trays reuse the
+# models actually referenced by CRAIC's craic_room.yaml.
+camera:
+  center: "-0.65 0 1.0"
+  extent: "2.5"
+
+objects:
+  - type: "box"
+    name: "factory_back_wall"
+    pos: "2.375 0 0.75"
+    size: "0.04 2.80 0.75"
+    material: "factory_wall_mat"
+    mass: 20
+
+  - type: "box"
+    name: "factory_front_wall"
+    pos: "-3.675 0 0.75"
+    size: "0.04 2.80 0.75"
+    material: "factory_wall_mat"
+    mass: 20
+
+  - type: "box"
+    name: "factory_left_wall"
+    pos: "-0.65 2.80 0.75"
+    size: "3.025 0.04 0.75"
+    material: "factory_wall_mat"
+    mass: 20
+
+  - type: "box"
+    name: "factory_right_wall"
+    pos: "-0.65 -2.80 0.75"
+    size: "3.025 0.04 0.75"
+    material: "factory_wall_mat"
+    mass: 20
+
+  - type: "box"
+    name: "factory_back_lower_panel"
+    pos: "2.33 0 0.28"
+    size: "0.012 2.65 0.10"
+    material: "factory_wall_panel_mat"
+    mass: 1
+
+  - type: "table"
+    name: "challenge_table"
+    pos: "-2.55 0 0"
+    top_size: "0.40 0.70 0.015"
+    top_pos: "0 0 0.815"
+    top_material: "table_top_mat"
+    leg_radius: 0.03
+    leg_height: 0.40
+    leg_z: 0.40
+    leg_offsets:
+      - "0.35 0.65"
+      - "0.35 -0.65"
+      - "-0.35 0.65"
+      - "-0.35 -0.65"
+    leg_material: "table_leg_mat"
+
+  - type: "open_box"
+    name: "sorting_box_0p4_0p3_0p3"
+    parent: "challenge_table"
+    pos: "0.16 0 0.83"
+    euler: "0 0 1.5708"
+    inner_size: "0.40 0.30 0.30"
+    wall_thickness: 0.024
+    floor_thickness: 0.016
+    floor_material: "drop_box_mat"
+    wall_material: "drop_box_edge_mat"
+
+  - type: "mujoco_model"
+    name: "smt_rack"
+    model_file: "../../models/tray_rack/model.xml"
+    pos: "1.05 0 0"
+    euler: "0 0 1.5708"
+
+  - type: "mujoco_model"
+    name: "smt_tray_1"
+    model_file: "../../models/charging_tray/model.xml"
+    asset_path_prefix: "../../charging_tray"
+    asset_scale: "0.9090909090909092 0.9090909090909092 1.0714285714285714"
+    # CRAIC preset 0: lower layer, local X=0.35, Y=+0.067, Z=0.75, with rack yawed 90 deg.
+    pos: "0.983 0.35 0.75"
+    euler: "1.5708 0 1.5708"
+    movable: true
+
+  - type: "mujoco_model"
+    name: "smt_tray_2"
+    model_file: "../../models/charging_tray/model.xml"
+    asset_path_prefix: "../../charging_tray"
+    asset_scale: "0.9090909090909092 0.9090909090909092 1.0714285714285714"
+    # CRAIC preset 0: lower layer, local X=0.15, Y=+0.067, Z=0.75, with rack yawed 90 deg.
+    pos: "0.983 0.15 0.75"
+    euler: "1.5708 0 1.5708"
+    movable: true
+
+  - type: "mujoco_model"
+    name: "smt_tray_3"
+    model_file: "../../models/charging_tray/model.xml"
+    asset_path_prefix: "../../charging_tray"
+    asset_scale: "0.9090909090909092 0.9090909090909092 1.0714285714285714"
+    # CRAIC preset 0: upper layer, local X=0.05, Y=+0.067, Z=1.15, with rack yawed 90 deg.
+    pos: "0.983 0.05 1.15"
+    euler: "1.5708 0 1.5708"
+    movable: true
+
+  - type: "mujoco_model"
+    name: "smt_tray_4"
+    model_file: "../../models/charging_tray/model.xml"
+    asset_path_prefix: "../../charging_tray"
+    asset_scale: "0.9090909090909092 0.9090909090909092 1.0714285714285714"
+    # CRAIC preset 0: upper layer, local X=0.25, Y=+0.067, Z=1.15, with rack yawed 90 deg.
+    pos: "0.983 0.25 1.15"
+    euler: "1.5708 0 1.5708"
+    movable: true
+
+  - type: "mujoco_model"
+    name: "smt_tray_5"
+    model_file: "../../models/charging_tray/model.xml"
+    asset_path_prefix: "../../charging_tray"
+    asset_scale: "0.9090909090909092 0.9090909090909092 1.0714285714285714"
+    # CRAIC preset 0: upper layer, local X=-0.15, Y=+0.067, Z=1.15, with rack yawed 90 deg.
+    pos: "0.983 -0.15 1.15"
+    euler: "1.5708 0 1.5708"
+    movable: true
+
+randomization:
+  shuffleable_parts:
+    names: []

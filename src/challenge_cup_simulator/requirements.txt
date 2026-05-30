@@ -1,0 +1,4 @@
+# Python 3.8-compatible MuJoCo-LiDAR release.
+# Install with --no-deps: this node uses the package scan patterns, while the
+# CPU ray tracing path is kept local because 0.2.x PyPI wheels omit core_cpu.
+mujoco-lidar==0.2.6

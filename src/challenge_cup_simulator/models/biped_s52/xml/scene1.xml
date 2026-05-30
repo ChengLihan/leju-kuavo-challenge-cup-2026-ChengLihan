@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mujoco model="Challenge Cup Scene 1">
+  <include file="biped_s52.xml"/>
+  <compiler angle="radian" autolimits="true"/>
+  <statistic center="0.6 0 1.0" extent="2.5"/>
+  <visual>
+    <headlight diffuse="0.5 0.5 0.5" ambient="0.25 0.25 0.25" specular="0 0 0"/>
+    <rgba haze="0.12 0.16 0.20 1"/>
+    <global azimuth="140" elevation="-18"/>
+  </visual>
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.35 0.45 0.55" rgb2="0.75 0.80 0.85" width="128" height="128"/>
+    <texture name="floor_mat_tex" type="2d" file="../../textures/matte_floor_green.png"/>
+    <material name="floor_mat" texrepeat="24 24" texuniform="false" rgba="0.24 0.38 0.30 1" reflectance="0.02" shininess="0.05" texture="floor_mat_tex"/>
+    <material name="factory_wall_mat" rgba="0.50 0.54 0.55 1" specular="0.04" shininess="0.02"/>
+    <material name="factory_wall_panel_mat" rgba="0.38 0.42 0.43 1" specular="0.03" shininess="0.02"/>
+    <material name="table_top_mat" rgba="0.10 0.30 0.10 1" specular="0.1" shininess="0.1"/>
+    <material name="table_leg_mat" rgba="0.60 0.60 0.60 1" specular="0.1" shininess="0.1"/>
+    <material name="parcel_brown_mat" rgba="0.88 0.84 0.73 1" specular="0.08" shininess="0.04"/>
+    <material name="parcel_yellow_mat" rgba="0.92 0.78 0.38 1" specular="0.08" shininess="0.04"/>
+    <material name="parcel_orange_mat" rgba="0.90 0.55 0.28 1" specular="0.08" shininess="0.04"/>
+    <material name="parcel_blue_mat" rgba="0.78 0.84 0.92 1" specular="0.08" shininess="0.04"/>
+    <material name="parcel_tape_mat" rgba="0.92 0.78 0.43 1" specular="0.04" shininess="0.02"/>
+    <material name="parcel_label_mat" rgba="0.96 0.96 0.88 1" specular="0.02" shininess="0.02"/>
+    <material name="parcel_label_line_mat" rgba="0.12 0.12 0.10 1" specular="0.01" shininess="0.01"/>
+    <material name="weighing_area_mat" rgba="0.10 0.45 0.90 0.85" emission="0.15"/>
+    <material name="drop_box_mat" rgba="0.10 0.62 0.34 0.55" emission="0.08"/>
+    <material name="drop_box_edge_mat" rgba="0.02 0.28 0.15 1"/>
+  </asset>
+  <worldbody>
+    <geom name="floor" type="plane" size="8 8 0.05" material="floor_mat" condim="3" friction="1 0.1 0.1"/>
+    <light name="main_light" pos="0 0 5" dir="0 0 -1" directional="true" diffuse="0.65 0.65 0.65" specular="0 0 0"/>
+    <body name="factory_back_wall" pos="3.35 0 0.75">
+      <geom name="factory_back_wall_geom" type="box" size="0.04 2.80 0.75" mass="20" friction="1 0.1 0.01" material="factory_wall_mat"/>
+    </body>
+    <body name="factory_front_wall" pos="-2.70 0 0.75">
+      <geom name="factory_front_wall_geom" type="box" size="0.04 2.80 0.75" mass="20" friction="1 0.1 0.01" material="factory_wall_mat"/>
+    </body>
+    <body name="factory_left_wall" pos="0.325 2.80 0.75">
+      <geom name="factory_left_wall_geom" type="box" size="3.025 0.04 0.75" mass="20" friction="1 0.1 0.01" material="factory_wall_mat"/>
+    </body>
+    <body name="factory_right_wall" pos="0.325 -2.80 0.75">
+      <geom name="factory_right_wall_geom" type="box" size="3.025 0.04 0.75" mass="20" friction="1 0.1 0.01" material="factory_wall_mat"/>
+    </body>
+    <body name="factory_back_lower_panel" pos="3.305 0 0.28">
+      <geom name="factory_back_lower_panel_geom" type="box" size="0.012 2.65 0.10" mass="1" friction="1 0.1 0.01" material="factory_wall_panel_mat"/>
+    </body>
+    <body name="challenge_table" pos="0.05 -0.20 0">
+      <geom name="challenge_table_top" type="box" size="0.40 0.70 0.015" pos="0 0 0.815" material="table_top_mat" mass="10" friction="1.2 0.2 0.01"/>
+      <geom name="challenge_table_leg_0" type="cylinder" size="0.03 0.4" pos="0.35 0.65 0.4" material="table_leg_mat" mass="2"/>
+      <geom name="challenge_table_leg_1" type="cylinder" size="0.03 0.4" pos="0.35 -0.65 0.4" material="table_leg_mat" mass="2"/>
+      <geom name="challenge_table_leg_2" type="cylinder" size="0.03 0.4" pos="-0.35 0.65 0.4" material="table_leg_mat" mass="2"/>
+      <geom name="challenge_table_leg_3" type="cylinder" size="0.03 0.4" pos="-0.35 -0.65 0.4" material="table_leg_mat" mass="2"/>
+      <geom name="weighing_area_0p2m_square" type="box" size="0.10 0.10 0.002" pos="-0.22 -0.36 0.833" material="weighing_area_mat" contype="0" conaffinity="0"/>
+      <body name="sorting_box_0p4_0p3_0p3" pos="0.05 0.49 0.83">
+        <geom name="sorting_box_0p4_0p3_0p3_floor" type="box" size="0.2 0.15 0.008" pos="0 0 0.008" material="drop_box_mat" contype="0" conaffinity="0"/>
+        <geom name="sorting_box_0p4_0p3_0p3_front_wall" type="box" size="0.2 0.012 0.15" pos="0 -0.162 0.15" material="drop_box_edge_mat" contype="1" conaffinity="1"/>
+        <geom name="sorting_box_0p4_0p3_0p3_back_wall" type="box" size="0.2 0.012 0.15" pos="0 0.162 0.15" material="drop_box_edge_mat" contype="1" conaffinity="1"/>
+        <geom name="sorting_box_0p4_0p3_0p3_left_wall" type="box" size="0.012 0.15 0.15" pos="-0.212 0 0.15" material="drop_box_edge_mat" contype="1" conaffinity="1"/>
+        <geom name="sorting_box_0p4_0p3_0p3_right_wall" type="box" size="0.012 0.15 0.15" pos="0.212 0 0.15" material="drop_box_edge_mat" contype="1" conaffinity="1"/>
+      </body>
+    </body>
+    <body name="parcel_1" pos="-0.26 -0.31 0.880" euler="0 0 1.5708">
+      <freejoint name="parcel_1"/>
+      <geom name="parcel_1_geom" type="box" size="0.0225 0.06 0.05" material="parcel_brown_mat" mass="0.18" condim="6" friction="4.5 1.2 0.03" solref="0.008 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="parcel_1_tape_long" type="box" size="0.0207 0.006 0.001" pos="0 0 0.0515" material="parcel_tape_mat" mass="0.0001" contype="0" conaffinity="0"/>
+      <geom name="parcel_1_tape_cross" type="box" size="0.006 0.0552 0.001" pos="0 0 0.0525" material="parcel_tape_mat" mass="0.0001" contype="0" conaffinity="0"/>
+      <geom name="parcel_1_label" type="box" size="0.00765 0.0132 0.001" pos="0.00495 0.0168 0.0535" material="parcel_label_mat" mass="0.0001" contype="0" conaffinity="0"/>
+      <geom name="parcel_1_label_line_1" type="box" size="0.00495 0.002 0.001" pos="0.00495 0.0186 0.0545" material="parcel_label_line_mat" mass="0.0001" contype="0" conaffinity="0"/>
+      <geom name="parcel_1_label_line_2" type="box" size="0.00495 0.002 0.001" pos="0.00495 0.0144 0.0545" material="parcel_label_line_mat" mass="0.0001" contype="0" conaffinity="0"/>
+    </body>
+    <body name="parcel_2" pos="-0.26 -0.09 0.880" euler="0 0 1.5708">
+      <freejoint name="parcel_2"/>
+      <geom name="parcel_2_geom" type="box" size="0.0225 0.06 0.05" material="parcel_yellow_mat" mass="0.14" condim="6" friction="4.5 1.2 0.03" solref="0.008 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="parcel_2_tape_long" type="box" size="0.0207 0.006 0.001" pos="0 0 0.0515" material="parcel_tape_mat" mass="0.0001" contype="0" conaffinity="0"/>
+      <geom name="parcel_2_tape_cross" type="box" size="0.006 0.0552 0.001" pos="0 0 0.0525" material="parcel_tape_mat" mass="0.0001" contype="0" conaffinity="0"/>
+      <geom name="parcel_2_label" type="box" size="0.00765 0.0132 0.001" pos="0.00495 0.0168 0.0535" material="parcel_label_mat" mass="0.0001" contype="0" conaffinity="0"/>
+      <geom name="parcel_2_label_line_1" type="box" size="0.00495 0.002 0.001" pos="0.00495 0.0186 0.0545" material="parcel_label_line_mat" mass="0.0001" contype="0" conaffinity="0"/>
+      <geom name="parcel_2_label_line_2" type="box" size="0.00495 0.002 0.001" pos="0.00495 0.0144 0.0545" material="parcel_label_line_mat" mass="0.0001" contype="0" conaffinity="0"/>
+    </body>
+    <body name="parcel_3" pos="-0.11 -0.31 0.880" euler="0 0 1.5708">
+      <freejoint name="parcel_3"/>
+      <geom name="parcel_3_geom" type="box" size="0.0225 0.06 0.05" material="parcel_orange_mat" mass="0.16" condim="6" friction="4.5 1.2 0.03" solref="0.008 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="parcel_3_tape_long" type="box" size="0.0207 0.006 0.001" pos="0 0 0.0515" material="parcel_tape_mat" mass="0.0001" contype="0" conaffinity="0"/>
+      <geom name="parcel_3_tape_cross" type="box" size="0.006 0.0552 0.001" pos="0 0 0.0525" material="parcel_tape_mat" mass="0.0001" contype="0" conaffinity="0"/>
+      <geom name="parcel_3_label" type="box" size="0.00765 0.0132 0.001" pos="0.00495 0.0168 0.0535" material="parcel_label_mat" mass="0.0001" contype="0" conaffinity="0"/>
+      <geom name="parcel_3_label_line_1" type="box" size="0.00495 0.002 0.001" pos="0.00495 0.0186 0.0545" material="parcel_label_line_mat" mass="0.0001" contype="0" conaffinity="0"/>
+      <geom name="parcel_3_label_line_2" type="box" size="0.00495 0.002 0.001" pos="0.00495 0.0144 0.0545" material="parcel_label_line_mat" mass="0.0001" contype="0" conaffinity="0"/>
+    </body>
+    <body name="parcel_4" pos="-0.11 -0.09 0.880" euler="0 0 1.5708">
+      <freejoint name="parcel_4"/>
+      <geom name="parcel_4_geom" type="box" size="0.0225 0.06 0.05" material="parcel_blue_mat" mass="0.2" condim="6" friction="4.5 1.2 0.03" solref="0.008 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="parcel_4_tape_long" type="box" size="0.0207 0.006 0.001" pos="0 0 0.0515" material="parcel_tape_mat" mass="0.0001" contype="0" conaffinity="0"/>
+      <geom name="parcel_4_tape_cross" type="box" size="0.006 0.0552 0.001" pos="0 0 0.0525" material="parcel_tape_mat" mass="0.0001" contype="0" conaffinity="0"/>
+      <geom name="parcel_4_label" type="box" size="0.00765 0.0132 0.001" pos="0.00495 0.0168 0.0535" material="parcel_label_mat" mass="0.0001" contype="0" conaffinity="0"/>
+      <geom name="parcel_4_label_line_1" type="box" size="0.00495 0.002 0.001" pos="0.00495 0.0186 0.0545" material="parcel_label_line_mat" mass="0.0001" contype="0" conaffinity="0"/>
+      <geom name="parcel_4_label_line_2" type="box" size="0.00495 0.002 0.001" pos="0.00495 0.0144 0.0545" material="parcel_label_line_mat" mass="0.0001" contype="0" conaffinity="0"/>
+    </body>
+  </worldbody>
+</mujoco>

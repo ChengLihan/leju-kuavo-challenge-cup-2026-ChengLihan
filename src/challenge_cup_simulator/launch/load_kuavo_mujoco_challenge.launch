@@ -1,0 +1,190 @@
+<?xml version="1.0" ?>
+
+<launch>
+  <env name="ROSCONSOLE_FORMAT" value="[${severity} ][${time:%Y-%m-%d-%H:%M:%S}][${node}]: ${message}"/>
+
+  <arg name="output_system_info" default="true"/>
+  <arg name="vr_remote_control" default="false"/>
+  <arg name="rviz" default="false"/>
+  <arg name="multiplot" default="false"/>
+  <arg name="robot_version" default="52"/>
+  <arg name="robot_type" default="2"/>
+  <arg name="nodelet_robot_type" default="2"/>
+  <arg name="play_back" default="false"/>
+  <arg name="raw_image" default="true"/>
+  <arg name="use_rosbag_nodelet" default="false"/>
+
+  <arg name="urdfFile" default="$(find challenge_cup_simulator)/models/biped_s52/urdf/biped_s52.urdf"/>
+  <arg name="kuavoConfigFile" default="$(find kuavo_assets)/config/kuavo_v52/kuavo.json"/>
+  <arg name="scene_name" default="scene1"/>
+  <arg name="sceneFile" default="$(find challenge_cup_simulator)/models/biped_s52/xml/$(arg scene_name).xml"/>
+  <arg name="enable_lidar" default="true"/>
+  <arg name="lidar_backend" default="cpu"/>
+  <arg name="lidar_output_type" default="pointcloud2"/>
+
+  <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
+    <arg name="robot_version" value="$(arg robot_version)"/>
+    <arg name="rviz" value="$(arg rviz)"/>
+    <arg name="urdfFile" value="$(arg urdfFile)"/>
+    <arg name="kuavoConfigFile" value="$(arg kuavoConfigFile)"/>
+  </include>
+
+  <param name="modelPath" value="$(find challenge_cup_simulator)/models"/>
+
+  <arg name="rl_param" default="$(find humanoid_controllers)/config/kuavo_v52/rl/skw_rl_param.info"/>
+  <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
+  <arg name="is_rl_start" default="false"/>
+  <arg name="use_external_mpc" default="true"/>
+  <arg name="wbc_frequency" default="1000"/>
+  <arg name="sensor_frequency" default="1000"/>
+  <arg name="with_estimation" default="true"/>
+  <arg name="use_joint_filter" default="false"/>
+  <arg name="estimator_type" default="1"/>
+  <arg name="wbc_only" default="false"/>
+  <arg name="arm_move_spd" default="1.2"/>
+  <arg name="start_way" default="manual"/>
+  <arg name="use_estimator_contact" default="false"/>
+  <arg name="visualize_humanoid" default="true"/>
+  <arg name="only_half_up_body" default="false"/>
+  <arg name="coredump" default="false"/>
+  <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
+  <arg name="with_coredump" value="" unless="$(arg coredump)"/>
+  <arg name="with_ik" default="true"/>
+  <arg name="with_mm_ik" default="false"/>
+  <arg name="init_fall_down_state" default="false"/>
+  <arg name="joy_execute_action" default="true"/>
+  <arg name="teach_pendant" default="0"/>
+  <arg name="init_state" default=""/>
+
+  <group if="$(arg multiplot)">
+    <include file="$(find humanoid_interface_ros)/launch/multiplot.launch"/>
+  </group>
+
+  <param name="multiplot" value="$(arg multiplot)"/>
+  <param name="wbc_only" value="$(arg wbc_only)"/>
+  <param name="use_external_mpc" value="$(arg use_external_mpc)"/>
+  <param name="wbc_frequency" value="$(arg wbc_frequency)"/>
+  <param name="sensor_frequency" value="$(arg sensor_frequency)"/>
+  <param name="with_estimation" value="$(arg with_estimation)"/>
+  <param name="use_joint_filter" value="$(arg use_joint_filter)"/>
+  <param name="estimator_type" value="$(arg estimator_type)"/>
+  <param name="play_back" value="$(arg play_back)"/>
+  <param name="arm_move_spd" value="$(arg arm_move_spd)"/>
+  <param name="start_way" value="$(arg start_way)"/>
+  <param name="use_estimator_contact" value="$(arg use_estimator_contact)"/>
+  <param name="only_half_up_body" value="$(arg only_half_up_body)"/>
+  <param name="build_cppad_state" value="0"/>
+  <param name="visualize_humanoid" value="$(arg visualize_humanoid)"/>
+  <rosparam param="isolated_cpus">[2, 3]</rosparam>
+  <param name="enable_pull_up_protect" value="true"/>
+  <param name="pull_up_force_threshold" value="0.70"/>
+  <param name="torso_interpolation_max_velocity" value="0.06"/>
+  <param name="joy_execute_action" value="$(arg joy_execute_action)"/>
+  <param name="init_fall_down_state" value="$(arg init_fall_down_state)"/>
+  <param name="network_model_file" value="$(arg network_model_file)"/>
+  <param name="rl_param" value="$(arg rl_param)"/>
+  <param name="is_rl_start" value="$(arg is_rl_start)"/>
+  <param name="robot_type" value="$(arg robot_type)"/>
+  <param name="nodelet_robot_type" value="$(arg nodelet_robot_type)"/>
+  <param name="teach_pendant" value="$(arg teach_pendant)"/>
+  <param name="/mpc/schedule/enable" value="false"/>
+  <param name="/mpc/schedule/start_time" value="-1.0"/>
+  <param name="/timeout_warning_ms" value="20"/>
+  <param name="/nodelet_manager/max_log_size_gb" value="2.0"/>
+  <param name="/nodelet_manager/log_delete_limit_gb" value="1.0"/>
+
+  <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info"/>
+
+  <group unless="$(arg play_back)">
+    <group if="$(eval arg('init_state') != '')">
+      <rosparam param="robot_init_state_param" subst_value="true">$(arg init_state)</rosparam>
+    </group>
+    <group if="$(eval arg('init_state') == '')">
+      <rosparam param="robot_init_state_param">[-0.65, 0.0, 0.9263857144327684, 1, 0, 0, 0, 0.005602956232090971, 0.000294712262477427, -0.4759969745499151, 0.7227850714615044, -0.2991465174566844, -0.005612517889826981, -0.006678799568598001, -0.000348405611365963, -0.4759798346026473, 0.7227559371714801, -0.299134671720278, 0.006687220230539202, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]</rosparam>
+    </group>
+  </group>
+
+  <group if="$(arg use_external_mpc)">
+    <node pkg="humanoid_interface_ros" type="humanoid_sqp_mpc" name="humanoid_sqp_mpc" output="screen" required="true" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+  </group>
+
+  <node pkg="humanoid_interface_ros" type="humanoid_gait_command" name="humanoid_gait_command" launch-prefix="nohup" output="log"/>
+  <node pkg="humanoid_interface_ros" type="humanoid_hand_control" name="humanoid_hand_control" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+  <node pkg="humanoid_interface_ros" type="humanoid_VR_hand_control" name="humanoid_VR_hand_control" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+  <node pkg="humanoid_interface_ros" type="humanoid_quest_control_with_arm" name="humanoid_quest_control_with_arm" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+  <node pkg="humanoid_interface_ros" type="humanoid_Arm_time_target_control" name="humanoid_Arm_time_target_control" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+  <node pkg="humanoid_interface_ros" type="humanoid_gait_switch_by_name" name="humanoid_gait_switch_by_name" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+
+  <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" respawn="false" output="screen" required="true" clear_params="true" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)">
+    <param name="num_worker_threads" type="int" value="10"/>
+  </node>
+  <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load HumanoidControllerNodelet nodelet_manager" respawn="false" output="screen" required="true"/>
+  <group if="$(arg with_estimation)">
+    <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 18">
+      <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml"/>
+    </node>
+  </group>
+
+  <group unless="$(arg play_back)">
+    <param name="legged_robot_scene_param" value="$(arg sceneFile)"/>
+    <node pkg="nodelet" type="nodelet" name="nodelet_mujoco" args="load MujocoNodelet nodelet_manager" respawn="false" output="screen"/>
+    <node if="$(arg enable_lidar)" pkg="challenge_cup_simulator" type="lidar_mid360_node.py" name="lidar_mid360" output="screen">
+      <param name="lidar_frame" value="base_link"/>
+      <param name="rate" value="10.0"/>
+      <param name="backend" value="$(arg lidar_backend)"/>
+      <param name="cutoff_dist" value="50.0"/>
+      <param name="use_geomgroup" value="true"/>
+      <param name="output_type" value="$(arg lidar_output_type)"/>
+      <param name="pc2_topic" value="/lidar/points"/>
+      <param name="pc2_time_mode" value="last_nonzero"/>
+    </node>
+  </group>
+
+  <group if="$(arg use_rosbag_nodelet)">
+    <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
+  </group>
+
+  <node pkg="challenge_cup_simulator" type="cam_info_pub.py" name="sim_camera_info_publisher" output="log"/>
+  <node pkg="tf2_ros" type="static_transform_publisher" name="camera_base_to_head_camera_view"
+        args="0.030804 -0.047500 -0.005609 0.543595 -0.543593 0.452221 -0.452221 camera_base 'Head Camera View'" output="screen"/>
+  <node pkg="tf2_ros" type="static_transform_publisher" name="left_wrist_camera_link_to_left_wrist_camera_view"
+        args="0 -0.01 0 0 1 0 0 left_wrist_camera_link 'Left Wrist Camera View'" output="screen"/>
+  <node pkg="tf2_ros" type="static_transform_publisher" name="right_wrist_camera_link_to_right_wrist_camera_view"
+        args="0 -0.01 0 0 1 0 0 right_wrist_camera_link 'Right wrist Camera View'" output="screen"/>
+
+  <group if="$(arg raw_image)">
+    <node pkg="image_transport" type="republish" name="cam_h_republish"
+          args="compressed in:=/cam_h/color/image_raw raw out:=/cam_h/color/image_raw"/>
+    <node pkg="image_transport" type="republish" name="cam_l_republish"
+          args="compressed in:=/cam_l/color/image_raw raw out:=/cam_l/color/image_raw"/>
+    <node pkg="image_transport" type="republish" name="cam_r_republish"
+          args="compressed in:=/cam_r/color/image_raw raw out:=/cam_r/color/image_raw"/>
+  </group>
+
+  <node pkg="challenge_cup_simulator" type="gripper_tf_publisher.py" name="gripper_tf_publisher" output="log"/>
+  <node pkg="challenge_cup_simulator" type="sim_leju_claw_interface.py" name="sim_leju_claw_interface" output="log"/>
+
+  <group if="$(arg output_system_info)">
+    <node pkg="humanoid_controllers" type="system_info_publisher.py" name="system_info_publisher"/>
+  </group>
+  <node pkg="kuavo_monitor" type="kuavo_monitor_node" name="kuavo_monitor_node" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+
+  <group if="$(arg vr_remote_control)">
+    <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch"/>
+  </group>
+  <group if="$(arg with_ik)">
+    <include file="$(find motion_capture_ik)/launch/ik_node.launch">
+      <arg name="robot_version" value="$(arg robot_version)"/>
+      <arg name="model_path" value="$(find challenge_cup_simulator)/models/biped_s52/urdf/drake/biped_v3_arm.urdf"/>
+    </include>
+  </group>
+  <group if="$(arg with_mm_ik)">
+    <include file="$(find mobile_manipulator_controllers)/launch/mobile_manipulator_controller.launch">
+      <arg name="robot_version" value="$(arg robot_version)"/>
+      <arg name="urdfFile" value="$(arg urdfFile)"/>
+      <arg name="sqp_mpc" value="1"/>
+      <arg name="rviz" value="false"/>
+      <arg name="visualize_mm" value="false"/>
+    </include>
+  </group>
+</launch>
