@@ -8,6 +8,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 
@@ -74,8 +75,6 @@ RIGHT_GRIPPER_OPEN = 0.0
 LEFT_GRIPPER_OPEN = 0.0
 RIGHT_GRIPPER_CLOSE = 255.0
 GRIPPER_COMMAND_HZ = 100.0
-GRIPPER_OPEN_REPEATS = 60
-GRIPPER_CLOSE_REPEATS = 100
 
 PICK_PLACE_JOBS = [
     {
@@ -220,28 +219,72 @@ def _publish_head_target(timeout):
     rospy.sleep(HEAD_SETTLE_TIME)
 
 
-def _publish_gripper(pub, left_cmd, right_cmd, repeats, hz=GRIPPER_COMMAND_HZ):
+class GripperCommandHold:
+    def __init__(self, pub, hz=GRIPPER_COMMAND_HZ):
+        self._pub = pub
+        self._hz = float(hz)
+        self._left_cmd = float(LEFT_GRIPPER_OPEN)
+        self._right_cmd = float(RIGHT_GRIPPER_OPEN)
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._thread = None
+
+    def start(self):
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(target=self._run, name="gripper_command_hold", daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+
+    def set_open(self):
+        self._set_command(LEFT_GRIPPER_OPEN, RIGHT_GRIPPER_OPEN)
+
+    def set_right_closed(self):
+        self._set_command(LEFT_GRIPPER_OPEN, RIGHT_GRIPPER_CLOSE)
+
+    def _set_command(self, left_cmd, right_cmd):
+        with self._lock:
+            self._left_cmd = float(left_cmd)
+            self._right_cmd = float(right_cmd)
+
+    def _run(self):
+        import rospy
+        from sensor_msgs.msg import JointState
+
+        rate = rospy.Rate(self._hz)
+        while not self._stop_event.is_set() and not rospy.is_shutdown():
+            with self._lock:
+                left_cmd = self._left_cmd
+                right_cmd = self._right_cmd
+            msg = JointState()
+            msg.header.stamp = rospy.Time.now()
+            msg.name = ["left_gripper_joint", "right_gripper_joint"]
+            msg.position = [left_cmd, right_cmd]
+            self._pub.publish(msg)
+            rate.sleep()
+
+
+def _start_gripper_hold(timeout):
     import rospy
     from sensor_msgs.msg import JointState
 
-    rate = rospy.Rate(hz)
-    for _ in range(repeats):
-        if rospy.is_shutdown():
-            break
-        msg = JointState()
-        msg.header.stamp = rospy.Time.now()
-        msg.name = ["left_gripper_joint", "right_gripper_joint"]
-        msg.position = [float(left_cmd), float(right_cmd)]
-        pub.publish(msg)
-        rate.sleep()
+    pub = rospy.Publisher("/gripper/command", JointState, queue_size=10)
+    _wait_for_connection(pub, timeout)
+    hold = GripperCommandHold(pub)
+    hold.start()
+    return hold
 
 
-def _publish_gripper_open(pub):
-    _publish_gripper(pub, LEFT_GRIPPER_OPEN, RIGHT_GRIPPER_OPEN, GRIPPER_OPEN_REPEATS)
+def _publish_gripper_open(gripper_hold):
+    gripper_hold.set_open()
 
 
-def _publish_right_gripper_close(pub):
-    _publish_gripper(pub, LEFT_GRIPPER_OPEN, RIGHT_GRIPPER_CLOSE, GRIPPER_CLOSE_REPEATS)
+def _publish_right_gripper_close(gripper_hold):
+    gripper_hold.set_right_closed()
 
 
 def _publish_arm_target_poses(target_pub, degrees_list, move_time):
@@ -445,7 +488,7 @@ def _move_right_hand_ik_once(
     return pos_err, quat_err, actual, actual_quat, cmd14
 
 
-def _pick_part_absolute(arm_pub, traj_pub, gripper_pub, job, hold_time):
+def _pick_part_absolute(arm_pub, traj_pub, gripper_hold, job, hold_time):
     import rospy
 
     grasp_target = list(job["grasp"])
@@ -483,7 +526,7 @@ def _pick_part_absolute(arm_pub, traj_pub, gripper_pub, job, hold_time):
             math.degrees(quat_err),
         )
 
-    _publish_right_gripper_close(gripper_pub)
+    _publish_right_gripper_close(gripper_hold)
     rospy.sleep(GRIPPER_CLOSE_TIME)
 
     lift_target = [grasp_target[0], grasp_target[1], grasp_target[2] + LIFT_Z_OFFSET]
@@ -506,7 +549,7 @@ def _pick_part_absolute(arm_pub, traj_pub, gripper_pub, job, hold_time):
     )
 
 
-def _place_part_absolute(arm_pub, traj_pub, gripper_pub, job, hold_time):
+def _place_part_absolute(arm_pub, traj_pub, gripper_hold, job, hold_time):
     import rospy
 
     rospy.loginfo(
@@ -541,7 +584,7 @@ def _place_part_absolute(arm_pub, traj_pub, gripper_pub, job, hold_time):
         place_err,
         "%.1fdeg" % math.degrees(quat_err) if quat_err is not None else "n/a",
     )
-    _publish_gripper_open(gripper_pub)
+    _publish_gripper_open(gripper_hold)
     rospy.sleep(PLACE_DWELL)
 
     _move_arm_to(
@@ -553,7 +596,7 @@ def _place_part_absolute(arm_pub, traj_pub, gripper_pub, job, hold_time):
     )
 
 
-def _run_absolute_pick_place_jobs(arm_pub, traj_pub, gripper_pub, jobs, hold_time):
+def _run_absolute_pick_place_jobs(arm_pub, traj_pub, gripper_hold, jobs, hold_time):
     import rospy
 
     for index, job in enumerate(jobs, start=1):
@@ -566,28 +609,26 @@ def _run_absolute_pick_place_jobs(arm_pub, traj_pub, gripper_pub, jobs, hold_tim
             [round(v, 4) for v in job["grasp"]],
             [round(v, 4) for v in job["place"]],
         )
-        _publish_gripper_open(gripper_pub)
-        _pick_part_absolute(arm_pub, traj_pub, gripper_pub, job, hold_time)
-        _place_part_absolute(arm_pub, traj_pub, gripper_pub, job, hold_time)
+        _publish_gripper_open(gripper_hold)
+        _pick_part_absolute(arm_pub, traj_pub, gripper_hold, job, hold_time)
+        _place_part_absolute(arm_pub, traj_pub, gripper_hold, job, hold_time)
 
 
 def _motion_points():
     return PREGRASP_POINTS_DEG[1:], [PREGRASP_POINTS_DEG[1], PREGRASP_POINTS_DEG[0]]
 
 
-def _run_fixed_grasp_motion():
+def _run_fixed_grasp_motion(gripper_hold):
     import rospy
     from sensor_msgs.msg import JointState
     from kuavo_msgs.msg import armTargetPoses
 
     arm_pub = rospy.Publisher(ARM_TARGET_POSES_TOPIC, armTargetPoses, queue_size=10)
     traj_pub = rospy.Publisher(ARM_TRAJ_TOPIC, JointState, queue_size=10)
-    gripper_pub = rospy.Publisher("/gripper/command", JointState, queue_size=10)
     _wait_for_connection(arm_pub, TOPIC_TIMEOUT)
     _wait_for_connection(traj_pub, TOPIC_TIMEOUT)
-    _wait_for_connection(gripper_pub, TOPIC_TIMEOUT)
 
-    _publish_gripper_open(gripper_pub)
+    _publish_gripper_open(gripper_hold)
 
     pregrasp_points, retract_points = _motion_points()
 
@@ -597,7 +638,7 @@ def _run_fixed_grasp_motion():
     _run_absolute_pick_place_jobs(
         arm_pub,
         traj_pub,
-        gripper_pub,
+        gripper_hold,
         PICK_PLACE_JOBS,
         FAST_GRASP_SETTLE_HOLD,
     )
@@ -633,6 +674,7 @@ def _run_once(args, run_index=1, run_total=1):
 
     launch_proc = None
     bag_proc = None
+    gripper_hold = None
     arm_mode_changed = False
     status = "failed"
     try:
@@ -652,13 +694,14 @@ def _run_once(args, run_index=1, run_total=1):
             raise RuntimeError("required topics missing: " + ", ".join(missing_topics))
 
         _publish_head_target(TOPIC_TIMEOUT)
+        gripper_hold = _start_gripper_hold(TOPIC_TIMEOUT)
 
         bag_proc, _bag_cmd = _start_rosbag(bag_path, topics)
         time.sleep(1.0 + RECORD_SETTLE_TIME)
 
         _set_arm_mode(ARM_MODE_EXTERNAL_CONTROL, timeout=TOPIC_TIMEOUT)
         arm_mode_changed = True
-        _run_fixed_grasp_motion()
+        _run_fixed_grasp_motion(gripper_hold)
         _set_arm_mode(ARM_MODE_AUTO_SWING, timeout=TOPIC_TIMEOUT)
         arm_mode_changed = False
 
@@ -666,6 +709,8 @@ def _run_once(args, run_index=1, run_total=1):
         status = "success"
     finally:
         _terminate_process_group(bag_proc, signal.SIGINT, timeout=10)
+        if gripper_hold is not None:
+            gripper_hold.stop()
         if arm_mode_changed:
             try:
                 _set_arm_mode(ARM_MODE_AUTO_SWING, timeout=TOPIC_TIMEOUT)
