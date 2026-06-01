@@ -214,3 +214,12 @@ objects:
     condim: "6"
     solref: "0.008 1.2"
     solimp: "0.95 0.99 0.001"
+
+randomization:
+  jitter_parts:
+    names:
+      - "parcel_1"
+      - "parcel_2"
+      - "parcel_3"
+      - "parcel_4"
+    y_offset: 0.03

@@ -824,34 +824,49 @@ class SceneBuilder:
 
     def _apply_randomization(self, config, seed):
         rand_cfg = config.get("randomization", {})
-        shuffle_cfg = rand_cfg.get("shuffleable_parts", {})
-        names = shuffle_cfg.get("names", []) if isinstance(shuffle_cfg, dict) else shuffle_cfg
-        if not names or len(names) < 2:
-            return
-        xy_offset = float(shuffle_cfg.get("xy_offset", 0.0)) if isinstance(shuffle_cfg, dict) else 0.0
+        rng = random.Random(seed)
         objects = config.get("objects", [])
         by_name = {obj.get("name"): obj for obj in objects if obj.get("name")}
-        orientation_keys = ("quat", "euler", "axisangle", "xyaxes", "zaxis")
-        positions = []
-        for name in names:
-            obj = by_name.get(name)
-            if obj:
-                x, y, _ = self._float_list(obj.get("pos", "0 0 0"), 3)
-                orientation = {key: obj[key] for key in orientation_keys if key in obj}
-                positions.append((x, y, orientation))
-        rng = random.Random(seed)
-        rng.shuffle(positions)
-        for name, (x, y, orientation) in zip(names, positions):
+
+        shuffle_cfg = rand_cfg.get("shuffleable_parts", {})
+        names = shuffle_cfg.get("names", []) if isinstance(shuffle_cfg, dict) else shuffle_cfg
+        if names and len(names) >= 2:
+            xy_offset = float(shuffle_cfg.get("xy_offset", 0.0)) if isinstance(shuffle_cfg, dict) else 0.0
+            orientation_keys = ("quat", "euler", "axisangle", "xyaxes", "zaxis")
+            positions = []
+            for name in names:
+                obj = by_name.get(name)
+                if obj:
+                    x, y, _ = self._float_list(obj.get("pos", "0 0 0"), 3)
+                    orientation = {key: obj[key] for key in orientation_keys if key in obj}
+                    positions.append((x, y, orientation))
+            rng.shuffle(positions)
+            for name, (x, y, orientation) in zip(names, positions):
+                obj = by_name.get(name)
+                if not obj:
+                    continue
+                _, _, z = self._float_list(obj.get("pos", "0 0 0"), 3)
+                x += rng.uniform(-xy_offset, xy_offset)
+                y += rng.uniform(-xy_offset, xy_offset)
+                obj["pos"] = f"{x:.3f} {y:.3f} {z:.3f}"
+                for key in orientation_keys:
+                    obj.pop(key, None)
+                obj.update(orientation)
+
+        jitter_cfg = rand_cfg.get("jitter_parts", {})
+        jitter_names = jitter_cfg.get("names", []) if isinstance(jitter_cfg, dict) else jitter_cfg
+        if not jitter_names:
+            return
+        x_offset = float(jitter_cfg.get("x_offset", 0.0)) if isinstance(jitter_cfg, dict) else 0.0
+        y_offset = float(jitter_cfg.get("y_offset", 0.0)) if isinstance(jitter_cfg, dict) else 0.0
+        for name in jitter_names:
             obj = by_name.get(name)
             if not obj:
                 continue
-            _, _, z = self._float_list(obj.get("pos", "0 0 0"), 3)
-            x += rng.uniform(-xy_offset, xy_offset)
-            y += rng.uniform(-xy_offset, xy_offset)
+            x, y, z = self._float_list(obj.get("pos", "0 0 0"), 3)
+            x += rng.uniform(-x_offset, x_offset)
+            y += rng.uniform(-y_offset, y_offset)
             obj["pos"] = f"{x:.3f} {y:.3f} {z:.3f}"
-            for key in orientation_keys:
-                obj.pop(key, None)
-            obj.update(orientation)
 
     @staticmethod
     def _deep_merge(base, override):
@@ -899,8 +914,13 @@ def main():
     parser.add_argument("-o", "--output", default=None)
     parser.add_argument("--all", action="store_true", help="generate all config/scenes/scene*.yaml files")
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--no-randomize", action="store_true",
+                        help="生成静态场景，不做构建期随机化（物体留在基准位）。"
+                             "用于运行时摆放(C 方案)：真实位置由 set_object_position 在运行时设置，"
+                             "不写进可读 XML。")
     parser.add_argument("--robot-version", default=os.environ.get("ROBOT_VERSION", "52"))
     args = parser.parse_args()
+    build_seed = None if args.no_randomize else args.seed
 
     config_files = []
     if args.all:
@@ -911,7 +931,7 @@ def main():
     for config_file in config_files:
         output = Path(args.output) if args.output and not args.all else default_output_dir / f"{config_file.stem}.xml"
         builder = SceneBuilder(robot_version=args.robot_version)
-        builder.load_config(config_file).build(seed=args.seed).save(output)
+        builder.load_config(config_file).build(seed=build_seed).save(output)
 
 
 if __name__ == "__main__":

@@ -6,7 +6,5 @@ find_package(catkin REQUIRED)
 catkin_package()
 
 catkin_install_python(PROGRAMS
-  scripts/scene1_express.py
-  scripts/scene2_sorting.py
-  scripts/scene3_tray.py
+  scripts/challenge_task.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})

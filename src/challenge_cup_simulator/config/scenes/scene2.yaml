@@ -277,6 +277,8 @@ objects:
         conaffinity: 0
 
 randomization:
+  jitter_parts:
+    names: []
   shuffleable_parts:
     names:
       - "part_type_a_1"

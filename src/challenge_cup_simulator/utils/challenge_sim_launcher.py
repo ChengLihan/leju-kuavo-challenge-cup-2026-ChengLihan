@@ -15,9 +15,10 @@
 
 要点：
   - 启动前用 challenge_secret(.so) 校验场景源文件完整性（防篡改），失败则拒绝启动。
-  - seed 仅用于 scene_builder 的“构建期物体随机化”，不随机机器人初始位姿。
-    当前只有 scene2 配置了 shuffleable_parts；scene1/scene3 传 seed 基本无效果。
-  - 生成的场景 XML 写入 challenge_cup_simulator 包内的 xml 目录（不是 /tmp），
+  - seed 用于 challenge_secret(.so) 的运行时物体布局：scene1 做包裹 Y 向抖动，
+    scene2 做零件 shuffle + 抖动；scene3 无随机化。
+  - scene_builder 只生成静态基准 XML，真实随机位置由仿真启动后写入 MuJoCo 内存。
+  - 生成的基准 XML 写入 challenge_cup_simulator 包内的 xml 目录（不是 /tmp），
     因为 XML 里的 include/mesh/texture 都是相对该 XML 文件位置的相对路径，放别处会加载失败。
   - roslaunch 时显式带上已验证过的稳定控制参数
     （with_estimation:=true / wbc_frequency:=1000 / sensor_frequency:=1000），
@@ -32,6 +33,8 @@ import sys
 import time
 
 VALID_SCENES = ("scene1", "scene2", "scene3")
+# 必须随机化的场景：运行时摆放任一环节失败均 fail-closed 退出，禁止用基准位悄悄跑错。
+SCENES_REQUIRING_PLACEMENT = ("scene1", "scene2")
 SIM_PKG = "challenge_cup_simulator"
 LAUNCH_FILE = "load_kuavo_mujoco_challenge.launch"
 
@@ -44,6 +47,12 @@ STABLE_CONTROL_ARGS = {
 }
 
 
+def _eval_mode():
+    """评测模式：CHALLENGE_EVAL_MODE=1 时，日志不暴露 seed 和摆放后的真实坐标。
+    本地调试默认关闭（保留 seed/坐标方便排查）。"""
+    return os.environ.get("CHALLENGE_EVAL_MODE") == "1"
+
+
 class ChallengeSimLauncher:
     """挑战杯仿真环境自动启动器"""
 
@@ -51,7 +60,7 @@ class ChallengeSimLauncher:
         """
         Args:
             scene: "scene1" / "scene2" / "scene3"
-            seed: 随机种子（仅影响 scene_builder 构建期物体随机化，默认 0）
+            seed: 随机种子（正式评测由组委会注入；scene1/scene2 用于运行时物体布局）
             robot_version: 机器人版本号（默认 52）。挑战杯只发布 biped_s52，
                 故固定默认 52，且**不**从 ROBOT_VERSION 环境变量读取——
                 否则选手可借环境变量切到无哈希基线的版本，绕过完整性校验。
@@ -64,6 +73,7 @@ class ChallengeSimLauncher:
         self.seed = seed
         self.robot_version = robot_version or 52
         self._launch_proc = None
+        self._cheat_monitor_proc = None
         self._sim_pkg_path = None
         self._scene_file = None
 
@@ -108,8 +118,24 @@ class ChallengeSimLauncher:
         self._wait_for_sim(timeout)
         rospy.loginfo("challenge_sim_launcher: 仿真环境就绪。")
 
+        # 运行时按 .so 计算的布局摆放物体（反作弊 B+C：真实位置不落进可读文件）
+        self._place_objects()
+        self._start_cheat_monitor()
+
     def stop(self):
         """关闭仿真环境（终止整个 roslaunch 进程组）"""
+        if self._cheat_monitor_proc is not None:
+            print("[INFO] challenge_sim_launcher: 关闭反作弊监控...")
+            try:
+                os.killpg(os.getpgid(self._cheat_monitor_proc.pid), signal.SIGTERM)
+                self._cheat_monitor_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(os.getpgid(self._cheat_monitor_proc.pid), signal.SIGKILL)
+                self._cheat_monitor_proc.wait(timeout=3)
+            except Exception:
+                pass
+            self._cheat_monitor_proc = None
+
         if self._launch_proc is not None:
             print("[INFO] challenge_sim_launcher: 关闭仿真环境...")
             try:
@@ -181,25 +207,167 @@ class ChallengeSimLauncher:
         builder = os.path.join(self._sim_pkg_path, "utils", "scene_builder.py")
         config = os.path.join(self._sim_pkg_path, "config", "scenes", f"{self.scene}.yaml")
         xml_dir = os.path.join(self._sim_pkg_path, "models", "biped_s52", "xml")
-        out_path = os.path.join(xml_dir, f"_scene_{self.scene}_seed_{self.seed}.xml")
+        # 文件名不带 seed：避免从文件名泄露评测 seed（真实物体位置也不写进该文件）。
+        out_path = os.path.join(xml_dir, f"_scene_{self.scene}_active.xml")
 
         for path in (builder, config):
             if not os.path.isfile(path):
                 print(f"[FATAL] challenge_sim_launcher: 缺少文件 {path}")
                 sys.exit(1)
 
+        # --no-randomize：生成静态基准场景，不把随机位置写进 XML；
+        # 真实位置在仿真就绪后由 _place_objects() 经 set_object_position 运行时摆放。
         cmd = [
             sys.executable, builder, config,
             "--seed", str(self.seed),
+            "--no-randomize",
             "-o", out_path,
         ]
-        print(f"[INFO] challenge_sim_launcher: 生成场景: {' '.join(cmd)}")
+        # 评测模式不在日志里暴露 seed
+        display_cmd = list(cmd)
+        if _eval_mode():
+            for i, tok in enumerate(display_cmd):
+                if tok == "--seed" and i + 1 < len(display_cmd):
+                    display_cmd[i + 1] = "***"
+        print(f"[INFO] challenge_sim_launcher: 生成场景: {' '.join(display_cmd)}")
         result = subprocess.run(cmd)
         if result.returncode != 0 or not os.path.isfile(out_path):
-            print(f"[FATAL] challenge_sim_launcher: 场景生成失败 ({self.scene}, seed={self.seed})")
+            seed_disp = "***" if _eval_mode() else self.seed
+            print(f"[FATAL] challenge_sim_launcher: 场景生成失败 ({self.scene}, seed={seed_disp})")
             sys.exit(1)
         print(f"[INFO] challenge_sim_launcher: 场景 XML -> {out_path}")
         return out_path
+
+    def _fail_placement(self, msg, required):
+        """需要随机化的场景(scene1/scene2)摆放失败 -> fail-closed 退出；否则告警。"""
+        import rospy
+        if required:
+            rospy.logfatal("challenge_sim_launcher: %s（场景 %s 必须随机化，禁止启动）",
+                           msg, self.scene)
+            self.stop()
+            sys.exit(1)
+        rospy.logwarn("challenge_sim_launcher: %s（场景 %s 无需随机化，跳过）", msg, self.scene)
+
+    def _lock_object_position(self, required):
+        """摆放完成后锁定 set_object_position：任务进行中禁止再挪物体（含 scene3 的静态物体）。
+        必须随机化的场景若上锁失败 -> fail-closed（否则场景在可篡改状态下继续运行）。"""
+        import rospy
+        from std_srvs.srv import SetBool
+        try:
+            rospy.wait_for_service("set_object_position_lock", timeout=5)
+            resp = rospy.ServiceProxy("set_object_position_lock", SetBool)(True)
+            if not getattr(resp, "success", False):
+                raise RuntimeError(getattr(resp, "message", "lock returned success=false"))
+            rospy.loginfo("challenge_sim_launcher: 已锁定 set_object_position。")
+        except Exception as exc:
+            if required:
+                rospy.logfatal("challenge_sim_launcher: 锁定 set_object_position 失败: %s"
+                               "（必须随机化场景，禁止在可篡改状态下运行）", exc)
+                self.stop()
+                sys.exit(1)
+            rospy.logwarn("challenge_sim_launcher: 锁定 set_object_position 失败: %s", exc)
+
+    def _place_objects(self):
+        """仿真就绪后，按 challenge_secret(.so) 计算的布局用 set_object_position 运行时摆放物体。
+        真实位置只在运行时设置，不写进任何可读场景文件（反作弊 B+C）。
+        scene1/scene2 必须随机化 -> 任一环节失败均 fail-closed 退出；scene3 无随机化则跳过。
+        无论哪种场景，最后都锁定 set_object_position，禁止任务进行中再篡改物体。"""
+        import rospy
+
+        required = self.scene in SCENES_REQUIRING_PLACEMENT
+
+        lib_dir = os.path.join(self._sim_pkg_path, "lib")
+        if lib_dir not in sys.path:
+            sys.path.insert(0, lib_dir)
+        try:
+            from challenge_secret import get_object_layout
+        except ImportError:
+            return self._fail_placement("未找到 challenge_secret，无法运行时摆放", required)
+
+        layout = get_object_layout(self.scene, self.seed)
+        if not layout:
+            if required:
+                return self._fail_placement("场景需要随机布局但 .so 返回空", True)
+            rospy.loginfo("challenge_sim_launcher: 场景 %s 无运行时布局，跳过摆放。", self.scene)
+            self._lock_object_position(required)
+            return
+
+        from kuavo_msgs.srv import SetObjectPosition
+        from std_srvs.srv import SetBool
+        from geometry_msgs.msg import Point, Quaternion
+
+        try:
+            rospy.wait_for_service("set_object_position", timeout=15)
+        except rospy.ROSException:
+            return self._fail_placement("set_object_position 服务不可用", required)
+        set_pos = rospy.ServiceProxy("set_object_position", SetObjectPosition)
+
+        # 暂停仿真，避免摆放过程被看到瞬移；拿不到 sim_start 也不致命
+        sim_ctrl = None
+        try:
+            rospy.wait_for_service("sim_start", timeout=5)
+            sim_ctrl = rospy.ServiceProxy("sim_start", SetBool)
+            sim_ctrl(False)
+        except Exception:
+            sim_ctrl = None
+
+        all_ok = True
+        for name, od in layout.items():
+            pos = od["pos"]
+            qw, qx, qy, qz = od["quat"]
+            try:
+                resp = set_pos(
+                    object_name=name,
+                    position=Point(x=pos[0], y=pos[1], z=pos[2]),
+                    orientation=Quaternion(x=qx, y=qy, z=qz, w=qw),
+                    randomize=False,
+                    x_min=0.0, x_max=0.0, y_min=0.0, y_max=0.0, z_min=0.0, z_max=0.0,
+                )
+                if resp.success:
+                    if _eval_mode():
+                        rospy.loginfo("challenge_sim_launcher: 摆放 %s 完成", name)
+                    else:
+                        rospy.loginfo("challenge_sim_launcher: 摆放 %s -> (%.3f, %.3f, %.3f)",
+                                      name, pos[0], pos[1], pos[2])
+                else:
+                    all_ok = False
+                    rospy.logerr("challenge_sim_launcher: 摆放 %s 失败: %s", name, resp.message)
+            except Exception as exc:
+                all_ok = False
+                rospy.logerr("challenge_sim_launcher: 摆放 %s 异常: %s", name, exc)
+
+        if sim_ctrl is not None:
+            try:
+                sim_ctrl(True)
+            except Exception:
+                pass
+
+        if not all_ok:
+            return self._fail_placement("部分物体摆放失败", required)
+
+        # 摆放成功后再上锁
+        self._lock_object_position(required)
+        rospy.loginfo("challenge_sim_launcher: 运行时摆放完成。")
+
+    def _start_cheat_monitor(self):
+        """摆放并上锁后启动 .so 内的监控：选手碰上帝视角接口即杀节点。"""
+        import rospy
+
+        lib_dir = os.path.join(self._sim_pkg_path, "lib")
+        code = (
+            "import sys; "
+            "sys.path.insert(0, sys.argv[1]); "
+            "import challenge_secret; "
+            "challenge_secret.run_cheat_monitor()"
+        )
+        cmd = [sys.executable, "-c", code, lib_dir]
+        self._cheat_monitor_proc = subprocess.Popen(cmd, preexec_fn=os.setsid)
+        time.sleep(0.5)
+        if self._cheat_monitor_proc.poll() is not None:
+            rospy.logfatal("challenge_sim_launcher: 反作弊监控启动失败，禁止继续运行。")
+            self.stop()
+            sys.exit(1)
+        rospy.loginfo("challenge_sim_launcher: 反作弊监控已启动。")
 
     def _wait_for_roscore(self, timeout):
         """等待 roscore 就绪"""

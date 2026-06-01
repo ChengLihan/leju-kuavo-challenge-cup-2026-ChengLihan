@@ -127,5 +127,7 @@ objects:
     movable: true
 
 randomization:
+  jitter_parts:
+    names: []
   shuffleable_parts:
     names: []

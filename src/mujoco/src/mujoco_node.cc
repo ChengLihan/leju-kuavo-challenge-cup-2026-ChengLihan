@@ -43,8 +43,11 @@
 #include <csignal>
 #include <atomic>
 #include <queue>
+#include <random>
 #include "kuavo_msgs/lejuClawCommand.h"
+#include "kuavo_msgs/SetObjectPosition.h"
 #include "sensor_msgs/JointState.h"
+#include "std_msgs/String.h"
 
 #include "joint_address.hpp"
 #include "dexhand_mujoco_node.h"
@@ -1206,6 +1209,140 @@ bool handleSimStart(std_srvs::SetBool::Request &req,
   sim->run = req.data;
   return true;
 }
+
+// 反作弊：物体摆放锁。launcher 初始化摆放完成后调用 set_object_position_lock(true) 上锁，
+// 之后任何 set_object_position 调用都被拒绝——避免选手在任务进行中反向篡改物体位置。
+static bool g_objectPositionLocked = false;
+// 调用监控：每次 set_object_position 都上报，便于组委会检测可疑调用。
+static ros::Publisher g_objectPositionMonitorPub;
+
+void publishObjectPositionMonitor(const std::string &event,
+                                  const std::string &caller,
+                                  const std::string &object_name,
+                                  const std::string &result)
+{
+  if (g_objectPositionMonitorPub) {
+    std_msgs::String mon;
+    mon.data = "event=" + event +
+               " caller=" + caller +
+               " object=" + object_name +
+               " t=" + std::to_string(ros::Time::now().toSec()) +
+               " result=" + result;
+    g_objectPositionMonitorPub.publish(mon);
+  }
+}
+
+bool handleObjectPositionLock(
+    ros::ServiceEvent<std_srvs::SetBool::Request, std_srvs::SetBool::Response> &event)
+{
+  const auto &req = event.getRequest();
+  auto &res = event.getResponse();
+  const std::string caller = event.getCallerName();
+  // 单向锁：只接受上锁(true)，拒绝任何解锁(false)。
+  // 否则同 ROS master 下选手可调用 lock(false) 解锁后再篡改物体位置。
+  if (!req.data) {
+    res.success = false;
+    res.message = "set_object_position_lock is one-way; unlock is not allowed";
+    publishObjectPositionMonitor("set_object_position_lock", caller, "-", "rejected_unlock");
+    ROS_WARN("set_object_position_lock: unlock request from '%s' REJECTED (one-way lock)",
+             caller.c_str());
+    return true;
+  }
+  g_objectPositionLocked = true;
+  res.success = true;
+  res.message = "object position locked";
+  publishObjectPositionMonitor("set_object_position_lock", caller, "-", "locked");
+  ROS_INFO("set_object_position_lock -> LOCKED by '%s'", caller.c_str());
+  return true;
+}
+
+// 运行时设置带 freejoint 的物体(body)的位置/姿态：直接写 qpos。
+// 由 challenge_sim_launcher 在仿真就绪后按 challenge_secret(.so) 计算的布局调用，
+// 让物体真实位置不落进任何可读场景文件（反作弊 C 方案）。body 与 freejoint 同名。
+bool setObjectPositionCallback(
+    ros::ServiceEvent<kuavo_msgs::SetObjectPosition::Request, kuavo_msgs::SetObjectPosition::Response> &event)
+{
+  const auto &req = event.getRequest();
+  auto &res = event.getResponse();
+  const std::string caller = event.getCallerName();
+  ROS_WARN("set_object_position called: object='%s' locked=%d",
+           req.object_name.c_str(), (int)g_objectPositionLocked);
+  auto finish = [&](bool success, const std::string &message) {
+    res.success = success;
+    res.message = message;
+    publishObjectPositionMonitor(
+        "set_object_position",
+        caller,
+        req.object_name,
+        std::string(success ? "success:" : "rejected:") + message);
+    return true;
+  };
+
+  // 上锁后拒绝（任务进行中不允许再挪物体）
+  if (g_objectPositionLocked) {
+    return finish(false, "set_object_position is locked");
+  }
+
+  if (!m || !d) {
+    return finish(false, "MuJoCo model or data not initialized");
+  }
+  if (mj_name2id(m, mjOBJ_BODY, req.object_name.c_str()) < 0) {
+    return finish(false, "Object '" + req.object_name + "' not found in model");
+  }
+  int joint_id = mj_name2id(m, mjOBJ_JOINT, req.object_name.c_str());
+  if (joint_id < 0) {
+    return finish(false, "Joint for '" + req.object_name + "' not found (object may be fixed)");
+  }
+  // 只允许操作 freejoint 物体，避免对非自由关节越界写 7 个 qpos 把状态写坏
+  if (m->jnt_type[joint_id] != mjJNT_FREE) {
+    return finish(false, "Joint for '" + req.object_name + "' is not a freejoint");
+  }
+  int qpos_addr = m->jnt_qposadr[joint_id];
+  if (qpos_addr < 0) {
+    return finish(false, "Invalid qpos address for '" + req.object_name + "'");
+  }
+  try {
+    // 锁定仿真，安全修改物理状态
+    const std::unique_lock<std::recursive_mutex> lock(sim->mtx);
+    static std::mt19937 gen{std::random_device{}()};
+
+    double x, y, z, qw, qx, qy, qz;
+    if (req.randomize) {
+      std::uniform_real_distribution<double> xd(req.x_min, req.x_max);
+      std::uniform_real_distribution<double> yd(req.y_min, req.y_max);
+      std::uniform_real_distribution<double> zd(req.z_min, req.z_max);
+      x = xd(gen); y = yd(gen); z = zd(gen);
+    } else {
+      x = req.position.x; y = req.position.y; z = req.position.z;
+    }
+    // 姿态：wxyz 全为 0 时保持原姿态
+    if (req.orientation.w == 0 && req.orientation.x == 0 &&
+        req.orientation.y == 0 && req.orientation.z == 0) {
+      qw = d->qpos[qpos_addr + 3]; qx = d->qpos[qpos_addr + 4];
+      qy = d->qpos[qpos_addr + 5]; qz = d->qpos[qpos_addr + 6];
+    } else {
+      qw = req.orientation.w; qx = req.orientation.x;
+      qy = req.orientation.y; qz = req.orientation.z;
+    }
+
+    d->qpos[qpos_addr + 0] = x; d->qpos[qpos_addr + 1] = y; d->qpos[qpos_addr + 2] = z;
+    d->qpos[qpos_addr + 3] = qw; d->qpos[qpos_addr + 4] = qx;
+    d->qpos[qpos_addr + 5] = qy; d->qpos[qpos_addr + 6] = qz;
+
+    // 清零该物体自由关节的速度，避免摆放后乱飞
+    int dof_addr = m->jnt_dofadr[joint_id];
+    if (dof_addr >= 0) {
+      for (int i = 0; i < 6 && dof_addr + i < m->nv; i++) {
+        d->qvel[dof_addr + i] = 0.0;
+      }
+    }
+
+    res.final_position.x = x; res.final_position.y = y; res.final_position.z = z;
+    return finish(true, "Object '" + req.object_name + "' moved");
+  } catch (const std::exception &e) {
+    return finish(false, std::string("set_object_position exception: ") + e.what());
+  }
+}
 #ifdef USE_DDS
 void ddsLowCmdCallback(const unitree_hg::msg::dds_::LowCmd_& cmd)
 {
@@ -1563,6 +1700,9 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   gripperJointStatePub = g_nh_ptr->advertise<sensor_msgs::JointState>("/gripper/state", 10);
   // // 创建服务
   ros::ServiceServer service = g_nh_ptr->advertiseService("sim_start", handleSimStart);
+  g_objectPositionMonitorPub = g_nh_ptr->advertise<std_msgs::String>("/cheat_monitor/set_object_position", 10);
+  ros::ServiceServer setObjectPositionService = g_nh_ptr->advertiseService("set_object_position", setObjectPositionCallback);
+  ros::ServiceServer setObjectPositionLockService = g_nh_ptr->advertiseService("set_object_position_lock", handleObjectPositionLock);
 
   // // 创建订阅器
   ros::Subscriber clawCmdSub = g_nh_ptr->subscribe("/leju_claw_command", 10, clawCmdCallback);

@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""
+挑战杯三场景统一任务入口。
+
+推荐运行方式：
+  rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3
+  rosrun challenge_cup_task_template challenge_task.py --scene scene2 --seed 3
+  rosrun challenge_cup_task_template challenge_task.py --scene scene3
+"""
+
+import argparse
+import os
+import sys
+
+
+SCENE_CONFIGS = {
+    "scene1": {
+        "node_name": "challenge_task_scene1",
+        "title": "场景一：包裹称重与摆放",
+        "seed_help": "scene1：4 个包裹在各自基准位附近做 y 方向随机抖动",
+    },
+    "scene2": {
+        "node_name": "challenge_task_scene2",
+        "title": "场景二：分拣归档",
+        "seed_help": "scene2：打乱 6 个零件的摆放位置",
+    },
+    "scene3": {
+        "node_name": "challenge_task_scene3",
+        "title": "场景三：SMT 料盘出库",
+        "seed_help": "scene3：当前无随机化配置，保留 seed 参数用于接口一致性",
+    },
+}
+
+
+def _load_launcher():
+    # 公共启动器位于受保护包 challenge_cup_simulator/utils/（选手不可改动），
+    # 从那里导入，确保完整性校验无法被绕过。
+    try:
+        import rospkg
+        sim_utils = os.path.join(rospkg.RosPack().get_path("challenge_cup_simulator"), "utils")
+    except Exception:
+        sim_utils = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "..", "..", "challenge_cup_simulator", "utils")
+    sys.path.insert(0, sim_utils)
+    from challenge_sim_launcher import ChallengeSimLauncher
+    return ChallengeSimLauncher
+
+
+def run_scene(scene, seed, node_name=None, timeout=120):
+    if scene not in SCENE_CONFIGS:
+        raise ValueError("unknown scene: {}".format(scene))
+
+    config = SCENE_CONFIGS[scene]
+    ChallengeSimLauncher = _load_launcher()
+
+    launcher = ChallengeSimLauncher(scene=scene, seed=seed)
+    launcher.start(node_name=node_name or config["node_name"], timeout=timeout)
+
+    import rospy
+    from geometry_msgs.msg import Twist
+    from sensor_msgs.msg import JointState
+
+    rospy.loginfo("=== %s任务启动 ===", config["title"])
+    rospy.loginfo("seed=%s；%s", seed, config["seed_help"])
+
+    cmd_vel_pub = rospy.Publisher("/cmd_vel", Twist, queue_size=10)
+    arm_traj_pub = rospy.Publisher("/kuavo_arm_traj", JointState, queue_size=10)
+
+    rospy.sleep(1.0)
+
+    # ========================================
+    # TODO: 在此实现三场景共用或按 scene 分支的任务逻辑
+    # ========================================
+    #
+    # if scene == "scene1":
+    #     pass  # 包裹称重与摆放
+    # elif scene == "scene2":
+    #     pass  # 分拣归档
+    # elif scene == "scene3":
+    #     pass  # SMT 料盘出库
+    #
+    # 可用接口：
+    #   /cmd_vel                  geometry_msgs/Twist
+    #   /kuavo_arm_traj           sensor_msgs/JointState
+    #   /lidar/points             sensor_msgs/PointCloud2
+    #   /sensors_data_raw         kuavo_msgs/sensorsData
+    #   /control_robot_leju_claw  kuavo_msgs/controlLejuClaw
+    #   /leju_claw_command        kuavo_msgs/lejuClawCommand
+    #   /leju_claw_state          kuavo_msgs/lejuClawState
+    #
+    # 示例：
+    # twist = Twist()
+    # twist.linear.x = 0.1
+    # cmd_vel_pub.publish(twist)
+
+    rospy.spin()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="挑战杯三场景统一任务入口")
+    parser.add_argument("--scene", choices=sorted(SCENE_CONFIGS), default="scene1",
+                        help="要启动的比赛场景")
+    parser.add_argument("--seed", type=int, default=0,
+                        help="随机种子；scene1/scene2 有效，scene3 当前保留为兼容参数")
+    parser.add_argument("--node-name", default=None,
+                        help="ROS 节点名；默认按 scene 自动设置")
+    parser.add_argument("--timeout", type=int, default=120,
+                        help="等待仿真就绪的超时时间，单位秒")
+    args = parser.parse_args()
+
+    run_scene(scene=args.scene, seed=args.seed, node_name=args.node_name, timeout=args.timeout)
+
+
+if __name__ == "__main__":
+    main()

@@ -154,6 +154,7 @@ add_message_files(
 ## Generate services in the 'srv' folder
 add_service_files(
   FILES
+  SetObjectPosition.srv
   jointMoveTo.srv
   setHwIntialState.srv
   changeArmCtrlMode.srv

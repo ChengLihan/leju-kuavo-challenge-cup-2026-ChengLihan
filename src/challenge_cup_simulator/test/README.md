@@ -11,6 +11,8 @@
 
 手臂实际控制走 `/kuavo_arm_target_poses`，但数据集只录 `/kuavo_arm_traj`。`/kuavo_arm_traj` 是 100Hz 的 `JointState` 线性插值轨迹，单位为角度，方便按连续 action 读取。
 
+夹爪 action 录 `/gripper/command`，脚本在开合动作期间按 100Hz burst 发布；打开约 0.6 秒，闭合约 1.0 秒。夹爪 state 录 `/gripper/state`。
+
 相机数据只录压缩图话题。`load_kuavo_mujoco_challenge.launch` 默认 `raw_image:=false`，避免额外 raw republish 占用 CPU；需要 raw 图调试时再显式传 `raw_image:=true`。脚本自动采集时也保持 `mujoco_vsync:=true`，画面更稳，30Hz 主要靠相机异步编码发布保证。
 
 ## 自动启动仿真并采集

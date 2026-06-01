@@ -1,0 +1,16 @@
+# Request
+string object_name           # 物体名称（body 与 freejoint 同名）
+geometry_msgs/Point position # 新位置 (x, y, z)
+geometry_msgs/Quaternion orientation # 新姿态（若 wxyz 全为 0 则保持原姿态）
+bool randomize               # 是否使用随机位置（true 时忽略 position，按下面范围在 .so 外随机；本项目默认 false）
+float64 x_min                # 随机范围
+float64 x_max
+float64 y_min
+float64 y_max
+float64 z_min
+float64 z_max
+---
+# Response
+bool success
+string message
+geometry_msgs/Point final_position
