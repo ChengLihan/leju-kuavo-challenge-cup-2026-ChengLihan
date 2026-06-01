@@ -17,14 +17,18 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ratio>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "lodepng.h"
 #include <mujoco/mjdata.h>
@@ -553,10 +557,19 @@ void ShowSensor(mj::Simulate* sim, mjrRect rect) {
 // Base class for camera rendering
 class CameraRenderer {
 public:
+  using Clock = std::chrono::steady_clock;
+  static constexpr int kCameraWidth = 1280;
+  static constexpr int kCameraHeight = 720;
+  static constexpr int kCameraPixels = kCameraWidth * kCameraHeight;
+
   CameraRenderer(mj::Simulate* sim, double frequency = 30.0)
   : nh_(),
     sim_(sim),
-    rate_(frequency) {
+    camera_period_(std::chrono::duration_cast<Clock::duration>(
+        Seconds(1.0 / std::max(frequency, 1.0)))),
+    next_render_time_(Clock::now()),
+    rgb_(3 * kCameraPixels),
+    depth_buffer_(kCameraPixels) {
     // ROS publishers：用成员 NodeHandle 创建，避免临时 NodeHandle()
     camera_pub_head            = nh_.advertise<sensor_msgs::CompressedImage>("/cam_h/color/image_raw/compressed", 1);
     camera_pub_left_wrist      = nh_.advertise<sensor_msgs::CompressedImage>("/cam_l/color/image_raw/compressed", 1);
@@ -566,14 +579,27 @@ public:
     camera_pub_left_wrist_depth= nh_.advertise<sensor_msgs::CompressedImage>("/cam_l/depth/image_rect_raw/compressedDepth", 1);
     camera_pub_right_wrist_depth=nh_.advertise<sensor_msgs::CompressedImage>("/cam_r/depth/image_rect_raw/compressedDepth", 1);
 
-    // offscreen buffer 需要足够大以支持相机渲染分辨率 (1280x720)
-    sim_->m_->vis.global.offwidth  = 1280;
-    sim_->m_->vis.global.offheight = 720;
+    sim_->m_->vis.global.offwidth  = kCameraWidth;
+    sim_->m_->vis.global.offheight = kCameraHeight;
     mjr_defaultContext(&ctx_);
     mjr_makeContext(sim_->m_, &ctx_, mjFONTSCALE_150);
+    mjv_defaultScene(&scn_);
+    mjv_makeScene(sim_->m_, &scn_, 1000);
+    pending_frame_.rgb.resize(3 * kCameraPixels);
+    pending_frame_.depth.resize(kCameraPixels);
+    encode_worker_ = std::thread(&CameraRenderer::EncodeAndPublishLoop, this);
   }
 
   ~CameraRenderer() {
+    {
+      std::lock_guard<std::mutex> lock(frame_mutex_);
+      stop_worker_ = true;
+    }
+    frame_cv_.notify_one();
+    if (encode_worker_.joinable()) {
+      encode_worker_.join();
+    }
+    mjv_freeScene(&scn_);
     mjr_freeContext(&ctx_);
   }
 
@@ -587,7 +613,14 @@ public:
   virtual const char* GetWindowName() const        = 0;
 
   void Render() {
-    rate_.sleep();  // 控制频率
+    const auto now = Clock::now();
+    if (now < next_render_time_) {
+      return;
+    }
+    do {
+      next_render_time_ += camera_period_;
+    } while (next_render_time_ <= now);
+
     const mjModel* m = sim_->m_;
     int cam_id = FindCamera(m);
     if (cam_id >= 0) RenderCameraView(cam_id);
@@ -603,10 +636,37 @@ public:
   ros::Publisher camera_pub_right_wrist_depth;
 
 protected:
+  enum class CameraTopic {
+    kHead,
+    kLeftWrist,
+    kRightWrist,
+    kUnknown,
+  };
+
+  struct CameraFrame {
+    ros::Time stamp;
+    std::string frame_id;
+    CameraTopic topic = CameraTopic::kUnknown;
+    float znear = 0.0f;
+    float zfar = 0.0f;
+    std::vector<unsigned char> rgb;
+    std::vector<float> depth;
+  };
+
   ros::NodeHandle nh_;
   mj::Simulate*   sim_;      // 非拥有指针
   mjrContext      ctx_;
-  ros::Rate       rate_;
+  mjvScene        scn_;
+  Clock::duration camera_period_;
+  Clock::time_point next_render_time_;
+  std::vector<unsigned char> rgb_;
+  std::vector<float> depth_buffer_;
+  CameraFrame pending_frame_;
+  bool has_pending_frame_ = false;
+  bool stop_worker_ = false;
+  std::mutex frame_mutex_;
+  std::condition_variable frame_cv_;
+  std::thread encode_worker_;
 
   int FindCamera(const mjModel* m) {
     for (int i = 0; i < m->ncam; ++i) {
@@ -616,16 +676,41 @@ protected:
     return -1;
   }
 
+  CameraTopic GetCameraTopic() const {
+    const std::string name = GetCameraNamePattern();
+    if (name.find("head") != std::string::npos) {
+      return CameraTopic::kHead;
+    }
+    if (name.find("left_wrist") != std::string::npos) {
+      return CameraTopic::kLeftWrist;
+    }
+    if (name.find("right_wrist") != std::string::npos) {
+      return CameraTopic::kRightWrist;
+    }
+    return CameraTopic::kUnknown;
+  }
+
+  void QueueFrame(const ros::Time& stamp, float znear, float zfar) {
+    std::lock_guard<std::mutex> lock(frame_mutex_);
+    pending_frame_.stamp = stamp;
+    pending_frame_.frame_id = GetWindowName();
+    pending_frame_.topic = GetCameraTopic();
+    pending_frame_.znear = znear;
+    pending_frame_.zfar = zfar;
+    pending_frame_.rgb.resize(3 * kCameraPixels);
+    pending_frame_.depth.resize(kCameraPixels);
+    std::copy(rgb_.begin(), rgb_.end(), pending_frame_.rgb.begin());
+    std::copy(depth_buffer_.begin(), depth_buffer_.end(), pending_frame_.depth.begin());
+    has_pending_frame_ = true;
+    frame_cv_.notify_one();
+  }
+
   void RenderCameraView(int cam_id) {
     // 深度范围（你的 if/else 是同逻辑）
     sim_->m_->vis.map.znear = 0.02;
     sim_->m_->vis.map.zfar  = 50;
 
-    const int width = 1280, height = 720;
-
-    // 场景
-    mjvScene scn;   mjv_defaultScene(&scn);
-    mjv_makeScene(sim_->m_, &scn, 1000);
+    const int width = kCameraWidth, height = kCameraHeight;
 
     // 相机
     mjvCamera cam;  mjv_defaultCamera(&cam);
@@ -637,15 +722,15 @@ protected:
     mjrRect viewport = {0, 0, width, height};
 
     // 渲染
-    mjv_updateScene(sim_->m_, sim_->d_, &opt, nullptr, &cam, mjCAT_ALL, &scn);
+    mjv_updateScene(sim_->m_, sim_->d_, &opt, nullptr, &cam, mjCAT_ALL, &scn_);
     mjr_setBuffer(mjFB_OFFSCREEN, &ctx_);
-    mjr_render(viewport, &scn, &ctx_);
+    mjr_render(viewport, &scn_, &ctx_);
 
     // 读像素
-    const int total = viewport.width * viewport.height;
-    std::unique_ptr<unsigned char[]> rgb(new unsigned char[3 * total]);
-    std::unique_ptr<float[]>         depth_buffer(new float[total]);
-    mjr_readPixels(rgb.get(), depth_buffer.get(), viewport, &ctx_);
+    mjr_readPixels(rgb_.data(), depth_buffer_.data(), viewport, &ctx_);
+    // Camera rendering uses its own offscreen context, but MuJoCo/OpenGL buffer
+    // selection is global enough that the main UI should be restored explicitly.
+    mjr_setBuffer(mjFB_WINDOW, &sim_->platform_ui->mjr_context());
     const ros::Time frame_stamp = ros::Time::now();
 
     // 重要：mjModel.vis.map.znear/zfar 是相对值，实际近/远裁剪面 = znear/zfar * stat.extent
@@ -658,29 +743,67 @@ protected:
     ROS_INFO_ONCE("[depth] stat.extent=%.4f  znear=%.4fm  zfar=%.3fm (linearization basis)",
                   extent, znear, zfar);
 
+    QueueFrame(frame_stamp, znear, zfar);
+  }
+
+  void EncodeAndPublishLoop() {
+    CameraFrame frame;
+    std::vector<uint16_t> depth_image_16(kCameraPixels);
+    std::vector<uchar> compressed_depth_buffer;
+    std::vector<uchar> color_buffer;
+    const std::vector<int> jpeg_params = {cv::IMWRITE_JPEG_QUALITY, 80};
+
+    while (true) {
+      {
+        std::unique_lock<std::mutex> lock(frame_mutex_);
+        frame_cv_.wait(lock, [this] { return stop_worker_ || has_pending_frame_; });
+        if (stop_worker_) {
+          break;
+        }
+        std::swap(frame, pending_frame_);
+        has_pending_frame_ = false;
+      }
+
+      EncodeAndPublishFrame(frame, depth_image_16, compressed_depth_buffer,
+                            color_buffer, jpeg_params);
+    }
+  }
+
+  void EncodeAndPublishFrame(
+      const CameraFrame& frame,
+      std::vector<uint16_t>& depth_image_16,
+      std::vector<uchar>& compressed_depth_buffer,
+      std::vector<uchar>& color_buffer,
+      const std::vector<int>& jpeg_params) {
+    if (frame.topic == CameraTopic::kUnknown ||
+        frame.rgb.size() != 3 * kCameraPixels ||
+        frame.depth.size() != kCameraPixels) {
+      return;
+    }
+
     // 线性化深度（米），并直接量化为 ROS 标准 16UC1 深度（毫米/单位）
     // 说明：ROS 约定 16UC1 深度图 1 单位 = 1mm，下游 (depth_image_proc / point_cloud_xyz /
     // RViz DepthCloud / RealSense pipeline) 均按 mm 解读。最大可表示 65.535 m，足够覆盖
     // 默认 zfar；超出范围或无效像素（z >= 1）置 0 表示无深度。
-    std::vector<uint16_t> depth_image_16(total);
-    for (int i = 0; i < total; ++i) {
-      const float z = depth_buffer[i];
+    for (int i = 0; i < kCameraPixels; ++i) {
+      const float z = frame.depth[i];
       // OpenGL 远平面像素 (z >= 1) 视为无深度
       if (z >= 1.0f) {
         depth_image_16[i] = 0;
         continue;
       }
-      const float linear_m = 1.0f / (z * (1.0f / zfar - 1.0f / znear) + 1.0f / znear);
+      const float linear_m = 1.0f / (z * (1.0f / frame.zfar - 1.0f / frame.znear) +
+                                     1.0f / frame.znear);
       const float mm = linear_m * 1000.0f;
       depth_image_16[i] = (mm <= 0.0f || mm >= 65535.0f) ? 0 :
-                           static_cast<uint16_t>(mm + 0.5f);
+                          static_cast<uint16_t>(mm + 0.5f);
     }
 
     // OpenCV：深度图压缩（PNG），格式需符合 compressed_depth_image_transport 解码器要求
-    cv::Mat depth_mat_16(height, width, CV_16UC1, depth_image_16.data());
+    cv::Mat depth_mat_16(kCameraHeight, kCameraWidth, CV_16UC1, depth_image_16.data());
     cv::Mat depth_mat_flipped;
     cv::flip(depth_mat_16, depth_mat_flipped, 0);
-    std::vector<uchar> compressed_depth_buffer;
+    compressed_depth_buffer.clear();
     cv::imencode(".png", depth_mat_flipped, compressed_depth_buffer);
 
     // compressed_depth_image_transport 要求：format 含 "compressedDepth png"，data 前 12 字节为 ConfigHeader
@@ -694,40 +817,43 @@ protected:
     hdr.depthParam[1] = 0.f;
 
     sensor_msgs::CompressedImage depth_msg;
-    depth_msg.header.stamp = frame_stamp;
-    depth_msg.header.frame_id = GetWindowName();
+    depth_msg.header.stamp = frame.stamp;
+    depth_msg.header.frame_id = frame.frame_id;
     // ROS 标准格式：16UC1（mm）+ compressedDepth png；不再附 znear/zfar，下游按毫米直接使用
     depth_msg.format = "16UC1; compressedDepth png";
     depth_msg.data.resize(sizeof(ConfigHeader));
     memcpy(depth_msg.data.data(), &hdr, sizeof(ConfigHeader));
-    depth_msg.data.insert(depth_msg.data.end(), compressed_depth_buffer.begin(), compressed_depth_buffer.end());
+    depth_msg.data.insert(depth_msg.data.end(), compressed_depth_buffer.begin(),
+                          compressed_depth_buffer.end());
 
     // RGB 图像（MuJoCo mjr_readPixels 输出 RGB 字节顺序）
     // 严格按 noetic compressed_image_transport 约定发布：
     //   - PNG/JPEG 内部字节固定为 BGR（即先 cvtColor RGB→BGR 再 imencode）
     //   - format 字段为 "<src>; <png|jpeg> compressed <inner>"，inner 必须是 bgr8
     // 这样 cv_bridge / image_transport republish / RViz 全部走标准路径，无需双重交换 hack。
-    cv::Mat image(height, width, CV_8UC3, rgb.get());
-    cv::flip(image, image, 0);
-    cv::cvtColor(image, image, cv::COLOR_RGB2BGR);
-    std::vector<uchar> buffer;
-    cv::imencode(".png", image, buffer);
+    cv::Mat image_rgb(kCameraHeight, kCameraWidth, CV_8UC3,
+                      const_cast<unsigned char*>(frame.rgb.data()));
+    cv::Mat image_flipped;
+    cv::Mat image_bgr;
+    cv::flip(image_rgb, image_flipped, 0);
+    cv::cvtColor(image_flipped, image_bgr, cv::COLOR_RGB2BGR);
+    color_buffer.clear();
+    cv::imencode(".jpg", image_bgr, color_buffer, jpeg_params);
 
     sensor_msgs::CompressedImage img_msg;
-    img_msg.header.stamp = frame_stamp;
-    img_msg.header.frame_id = GetWindowName();
-    img_msg.format = "bgr8; png compressed bgr8";
-    img_msg.data = buffer;
+    img_msg.header.stamp = frame.stamp;
+    img_msg.header.frame_id = frame.frame_id;
+    img_msg.format = "bgr8; jpeg compressed bgr8";
+    img_msg.data = color_buffer;
 
     // 根据相机名发布
-    const std::string name = GetCameraNamePattern();
-    if (name.find("head") != std::string::npos) {
+    if (frame.topic == CameraTopic::kHead) {
       camera_pub_head.publish(img_msg);
       camera_pub_head_depth.publish(depth_msg);
-    } else if (name.find("left_wrist") != std::string::npos) {
+    } else if (frame.topic == CameraTopic::kLeftWrist) {
       camera_pub_left_wrist.publish(img_msg);
       camera_pub_left_wrist_depth.publish(depth_msg);
-    } else if (name.find("right_wrist") != std::string::npos) {
+    } else if (frame.topic == CameraTopic::kRightWrist) {
       camera_pub_right_wrist.publish(img_msg);
       camera_pub_right_wrist_depth.publish(depth_msg);
     }
@@ -736,7 +862,6 @@ protected:
     // if (std::string(GetWindowName()) == "Head Camera View") { ... }
     // cv::imshow(GetWindowName(), image);  // 仅在有 GUI 时可用
 
-    mjv_freeScene(&scn);
   }
 };
 

@@ -3,8 +3,6 @@
 
 import argparse
 import datetime as _datetime
-import hashlib
-import json
 import math
 import os
 import signal
@@ -26,7 +24,6 @@ DEFAULT_TOPICS = [
     "/gripper/state",
     "/sensors_data_raw",
     "/kuavo_arm_traj",
-    "/kuavo_arm_target_poses",
     "/robot_head_motion_data",
     "/cam_h/color/image_raw/compressed",
     "/cam_l/color/image_raw/compressed",
@@ -58,6 +55,8 @@ ARM_MODE_EXTERNAL_CONTROL = 2
 ARM_MODE_AUTO_SWING = 1
 ARM_MODE_SERVICE = "/arm_traj_change_mode"
 ARM_TARGET_POSES_TOPIC = "/kuavo_arm_target_poses"
+ARM_TRAJ_TOPIC = "/kuavo_arm_traj"
+ARM_TRAJ_HZ = 100.0
 ARM_MOVE_TIME = 2.0
 ARM_SETTLE_TIME = 0.3
 ORIENTATION_TOLERANCE_RAD = math.radians(20.0)
@@ -71,10 +70,12 @@ RECORD_SETTLE_TIME = 2.0
 POST_ARM_MODE_RECORD_TIME = 1.0
 TOPIC_TIMEOUT = 20.0
 LAUNCH_TIMEOUT = 120.0
-BAG_PREFIX = "dataset"
 RIGHT_GRIPPER_OPEN = 0.0
 LEFT_GRIPPER_OPEN = 0.0
 RIGHT_GRIPPER_CLOSE = 255.0
+GRIPPER_COMMAND_HZ = 100.0
+GRIPPER_OPEN_REPEATS = 60
+GRIPPER_CLOSE_REPEATS = 100
 
 PICK_PLACE_JOBS = [
     {
@@ -98,50 +99,22 @@ def _now_tag():
     return _datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
-def _sha256_file(path):
-    if not path or not os.path.isfile(path):
-        return None
-    digest = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _sim_pkg_path():
-    try:
-        import rospkg
-
-        return rospkg.RosPack().get_path("challenge_cup_simulator")
-    except Exception:
-        return os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
-
-
-def _scene_file_path():
-    return os.path.join(
-        _sim_pkg_path(),
-        "models",
-        "biped_s52",
-        "xml",
-        f"{SCENE_NAME}.xml",
-    )
-
-
-def _start_scene_launch(log_path):
-    log_file = open(log_path, "w")
+def _start_scene_launch():
     cmd = [
         "roslaunch",
         "challenge_cup_simulator",
         "load_kuavo_mujoco_challenge.launch",
         f"scene_name:={SCENE_NAME}",
+        "raw_image:=false",
+        "mujoco_vsync:=true",
     ]
     proc = subprocess.Popen(
         cmd,
-        stdout=log_file,
+        stdout=subprocess.DEVNULL,
         stderr=subprocess.STDOUT,
         preexec_fn=os.setsid,
     )
-    return proc, log_file, cmd
+    return proc, cmd
 
 
 def _wait_for_roscore(proc, timeout):
@@ -247,10 +220,11 @@ def _publish_head_target(timeout):
     rospy.sleep(HEAD_SETTLE_TIME)
 
 
-def _publish_gripper(pub, left_cmd, right_cmd, repeats=12, dt=0.05):
+def _publish_gripper(pub, left_cmd, right_cmd, repeats, hz=GRIPPER_COMMAND_HZ):
     import rospy
     from sensor_msgs.msg import JointState
 
+    rate = rospy.Rate(hz)
     for _ in range(repeats):
         if rospy.is_shutdown():
             break
@@ -259,31 +233,68 @@ def _publish_gripper(pub, left_cmd, right_cmd, repeats=12, dt=0.05):
         msg.name = ["left_gripper_joint", "right_gripper_joint"]
         msg.position = [float(left_cmd), float(right_cmd)]
         pub.publish(msg)
-        rospy.sleep(dt)
+        rate.sleep()
 
 
 def _publish_gripper_open(pub):
-    _publish_gripper(pub, LEFT_GRIPPER_OPEN, RIGHT_GRIPPER_OPEN)
+    _publish_gripper(pub, LEFT_GRIPPER_OPEN, RIGHT_GRIPPER_OPEN, GRIPPER_OPEN_REPEATS)
 
 
 def _publish_right_gripper_close(pub):
-    _publish_gripper(pub, LEFT_GRIPPER_OPEN, RIGHT_GRIPPER_CLOSE, repeats=20)
+    _publish_gripper(pub, LEFT_GRIPPER_OPEN, RIGHT_GRIPPER_CLOSE, GRIPPER_CLOSE_REPEATS)
 
 
-def _publish_arm_target_poses(pub, degrees_list, move_time):
+def _publish_arm_target_poses(target_pub, degrees_list, move_time):
     from kuavo_msgs.msg import armTargetPoses
 
     msg = armTargetPoses()
     msg.times = [float(move_time)]
     msg.values = [float(v) for v in degrees_list]
-    pub.publish(msg)
+    target_pub.publish(msg)
 
 
-def _move_arm_to(pub, degrees_list, move_time=ARM_MOVE_TIME, settle=ARM_SETTLE_TIME):
+def _publish_arm_traj_point(traj_pub, degrees_list):
+    import rospy
+    from sensor_msgs.msg import JointState
+
+    traj_msg = JointState()
+    traj_msg.header.stamp = rospy.Time.now()
+    traj_msg.name = ARM_JOINT_NAMES
+    traj_msg.position = [float(v) for v in degrees_list]
+    traj_pub.publish(traj_msg)
+
+
+def _publish_arm_traj_interpolation(traj_pub, start_degrees, target_degrees, duration):
     import rospy
 
-    _publish_arm_target_poses(pub, degrees_list, move_time)
-    rospy.sleep(move_time + settle)
+    start = [float(v) for v in start_degrees]
+    target = [float(v) for v in target_degrees]
+    if len(start) != len(target):
+        raise ValueError(f"arm traj interpolation length mismatch: {len(start)} != {len(target)}")
+
+    steps = max(1, int(round(float(duration) * ARM_TRAJ_HZ)))
+    rate = rospy.Rate(ARM_TRAJ_HZ)
+    for step in range(steps + 1):
+        if rospy.is_shutdown():
+            break
+        alpha = float(step) / float(steps)
+        point = [start[i] + (target[i] - start[i]) * alpha for i in range(len(target))]
+        _publish_arm_traj_point(traj_pub, point)
+        if step < steps:
+            rate.sleep()
+
+
+def _execute_arm_motion(target_pub, traj_pub, start_degrees, target_degrees, move_time, settle):
+    import rospy
+
+    _publish_arm_target_poses(target_pub, target_degrees, move_time)
+    _publish_arm_traj_interpolation(traj_pub, start_degrees, target_degrees, move_time)
+    rospy.sleep(settle)
+
+
+def _move_arm_to(target_pub, traj_pub, degrees_list, move_time=ARM_MOVE_TIME, settle=ARM_SETTLE_TIME):
+    start = _rad_to_deg(_read_current_arm_joints(TOPIC_TIMEOUT))
+    _execute_arm_motion(target_pub, traj_pub, start, degrees_list, move_time, settle)
 
 
 def _measure_right_pose(timeout):
@@ -396,7 +407,8 @@ def _call_right_hand_ik(
 
 
 def _move_right_hand_ik_once(
-    pub,
+    target_pub,
+    traj_pub,
     right_pos,
     right_quat,
     timeout,
@@ -418,8 +430,7 @@ def _move_right_hand_ik_once(
         pos_cost_weight=pos_cost_weight,
     )
     cmd14 = _rad_to_deg(ik_q)
-    _publish_arm_target_poses(pub, cmd14, move_time)
-    rospy.sleep(move_time + settle_time)
+    _execute_arm_motion(target_pub, traj_pub, _rad_to_deg(current), cmd14, move_time, settle_time)
 
     actual, actual_quat = _measure_right_pose(timeout)
     pos_err = _axis_error(actual, right_pos, (True, True, True))
@@ -434,7 +445,7 @@ def _move_right_hand_ik_once(
     return pos_err, quat_err, actual, actual_quat, cmd14
 
 
-def _pick_part_absolute(arm_pub, gripper_pub, job, hold_time):
+def _pick_part_absolute(arm_pub, traj_pub, gripper_pub, job, hold_time):
     import rospy
 
     grasp_target = list(job["grasp"])
@@ -445,6 +456,7 @@ def _pick_part_absolute(arm_pub, gripper_pub, job, hold_time):
     )
     pos_err, quat_err, actual, actual_quat, _cmd14 = _move_right_hand_ik_once(
         arm_pub,
+        traj_pub,
         grasp_target,
         RIGHT_HAND_QUAT_XYZW,
         TOPIC_TIMEOUT,
@@ -477,6 +489,7 @@ def _pick_part_absolute(arm_pub, gripper_pub, job, hold_time):
     lift_target = [grasp_target[0], grasp_target[1], grasp_target[2] + LIFT_Z_OFFSET]
     lift_err, _lift_quat_err, _lift_actual, _lift_quat, _lift_cmd14 = _move_right_hand_ik_once(
         arm_pub,
+        traj_pub,
         lift_target,
         actual_quat,
         TOPIC_TIMEOUT,
@@ -493,7 +506,7 @@ def _pick_part_absolute(arm_pub, gripper_pub, job, hold_time):
     )
 
 
-def _place_part_absolute(arm_pub, gripper_pub, job, hold_time):
+def _place_part_absolute(arm_pub, traj_pub, gripper_pub, job, hold_time):
     import rospy
 
     rospy.loginfo(
@@ -502,6 +515,7 @@ def _place_part_absolute(arm_pub, gripper_pub, job, hold_time):
     )
     _move_arm_to(
         arm_pub,
+        traj_pub,
         PREGRASP_POINTS_DEG[2],
         move_time=ARM_MOVE_TIME,
         settle=FAST_GRASP_SETTLE_HOLD,
@@ -510,6 +524,7 @@ def _place_part_absolute(arm_pub, gripper_pub, job, hold_time):
     place_target = list(job["place"])
     place_err, quat_err, actual, _actual_quat, _cmd14 = _move_right_hand_ik_once(
         arm_pub,
+        traj_pub,
         place_target,
         None,
         TOPIC_TIMEOUT,
@@ -531,13 +546,14 @@ def _place_part_absolute(arm_pub, gripper_pub, job, hold_time):
 
     _move_arm_to(
         arm_pub,
+        traj_pub,
         PREGRASP_POINTS_DEG[2],
         move_time=ARM_MOVE_TIME,
         settle=ARM_SETTLE_TIME,
     )
 
 
-def _run_absolute_pick_place_jobs(arm_pub, gripper_pub, jobs, hold_time):
+def _run_absolute_pick_place_jobs(arm_pub, traj_pub, gripper_pub, jobs, hold_time):
     import rospy
 
     for index, job in enumerate(jobs, start=1):
@@ -551,8 +567,8 @@ def _run_absolute_pick_place_jobs(arm_pub, gripper_pub, jobs, hold_time):
             [round(v, 4) for v in job["place"]],
         )
         _publish_gripper_open(gripper_pub)
-        _pick_part_absolute(arm_pub, gripper_pub, job, hold_time)
-        _place_part_absolute(arm_pub, gripper_pub, job, hold_time)
+        _pick_part_absolute(arm_pub, traj_pub, gripper_pub, job, hold_time)
+        _place_part_absolute(arm_pub, traj_pub, gripper_pub, job, hold_time)
 
 
 def _motion_points():
@@ -565,8 +581,10 @@ def _run_fixed_grasp_motion():
     from kuavo_msgs.msg import armTargetPoses
 
     arm_pub = rospy.Publisher(ARM_TARGET_POSES_TOPIC, armTargetPoses, queue_size=10)
+    traj_pub = rospy.Publisher(ARM_TRAJ_TOPIC, JointState, queue_size=10)
     gripper_pub = rospy.Publisher("/gripper/command", JointState, queue_size=10)
     _wait_for_connection(arm_pub, TOPIC_TIMEOUT)
+    _wait_for_connection(traj_pub, TOPIC_TIMEOUT)
     _wait_for_connection(gripper_pub, TOPIC_TIMEOUT)
 
     _publish_gripper_open(gripper_pub)
@@ -574,38 +592,30 @@ def _run_fixed_grasp_motion():
     pregrasp_points, retract_points = _motion_points()
 
     for point in pregrasp_points:
-        _move_arm_to(arm_pub, point)
+        _move_arm_to(arm_pub, traj_pub, point)
 
     _run_absolute_pick_place_jobs(
         arm_pub,
+        traj_pub,
         gripper_pub,
         PICK_PLACE_JOBS,
         FAST_GRASP_SETTLE_HOLD,
     )
 
     for point in retract_points:
-        _move_arm_to(arm_pub, point)
+        _move_arm_to(arm_pub, traj_pub, point)
     rospy.loginfo("scene2 dataset: retracted through pregrasp")
 
 
-def _start_rosbag(bag_path, topics, log_path):
-    log_file = open(log_path, "w")
+def _start_rosbag(bag_path, topics):
     cmd = ["rosbag", "record", "-O", bag_path] + topics
     proc = subprocess.Popen(
         cmd,
-        stdout=log_file,
+        stdout=subprocess.DEVNULL,
         stderr=subprocess.STDOUT,
         preexec_fn=os.setsid,
     )
-    return proc, log_file, cmd
-
-
-def _write_metadata(path, data):
-    tmp_path = f"{path}.tmp"
-    with open(tmp_path, "w") as f:
-        json.dump(data, f, indent=2, sort_keys=True)
-        f.write("\n")
-    os.replace(tmp_path, path)
+    return proc, cmd
 
 
 def _run_once(args, run_index=1, run_total=1):
@@ -615,52 +625,14 @@ def _run_once(args, run_index=1, run_total=1):
     run_tag = f"{SCENE_NAME}_{_now_tag()}"
     if run_total > 1:
         run_tag += f"_run_{run_index:03d}"
-    run_dir = os.path.abspath(os.path.join(args.output_dir, run_tag))
-    os.makedirs(run_dir, exist_ok=True)
+    output_dir = os.path.abspath(args.output_dir)
+    os.makedirs(output_dir, exist_ok=True)
 
-    bag_path = os.path.join(run_dir, f"{BAG_PREFIX}_{SCENE_NAME}.bag")
-    metadata_path = os.path.join(run_dir, "metadata.json")
+    bag_path = os.path.join(output_dir, f"{run_tag}.bag")
     topics = list(DEFAULT_TOPICS)
-    scene_file = _scene_file_path()
-
-    metadata = {
-        "scene": SCENE_NAME,
-        "run_index": run_index,
-        "run_total": run_total,
-        "use_existing_sim": args.use_existing_sim,
-        "target_object": PICK_PLACE_JOBS[0]["object"],
-        "target_objects": [job["object"] for job in PICK_PLACE_JOBS],
-        "target_object_alias": TARGET_OBJECT_ALIAS,
-        "target_bin": TARGET_BIN,
-        "pick_place_jobs": PICK_PLACE_JOBS,
-        "fixed_right_hand_target_xyz": FIXED_RIGHT_HAND_TARGET_XYZ,
-        "second_right_hand_target_xyz": SECOND_RIGHT_HAND_TARGET_XYZ,
-        "bin_b_place_targets_xyz": BIN_B_PLACE_TARGETS_XYZ,
-        "right_hand_quat_xyzw": RIGHT_HAND_QUAT_XYZW,
-        "lift_z_offset": LIFT_Z_OFFSET,
-        "place_dwell": PLACE_DWELL,
-        "ik_constraint_mode_position": IK_MODE_POS_HARD_ORI_SOFT,
-        "ik_constraint_mode_orientation": IK_MODE_THREE_POINT_MIXED,
-        "ik_constraint_mode_lift": IK_MODE_POS_HARD_ORI_SOFT,
-        "ik_three_point_weight": THREE_POINT_WEIGHT,
-        "fast_grasp_settle_hold": FAST_GRASP_SETTLE_HOLD,
-        "orientation_tolerance_rad": ORIENTATION_TOLERANCE_RAD,
-        "grasp_position_tolerance": GRASP_POSITION_TOLERANCE,
-        "ik_strategy": "two_absolute_pick_place_jobs_one_shot_ik",
-        "right_gripper_close": RIGHT_GRIPPER_CLOSE,
-        "post_arm_mode_record_time": POST_ARM_MODE_RECORD_TIME,
-        "topics": topics,
-        "bag_path": bag_path,
-        "roslaunch_command": None,
-        "status": "starting",
-        "started_at": _datetime.datetime.now().isoformat(),
-    }
-    _write_metadata(metadata_path, metadata)
 
     launch_proc = None
-    launch_log = None
     bag_proc = None
-    bag_log = None
     arm_mode_changed = False
     status = "failed"
     try:
@@ -670,33 +642,20 @@ def _run_once(args, run_index=1, run_total=1):
             if missing:
                 raise RuntimeError("existing simulation is not ready: " + ", ".join(missing))
         else:
-            launch_proc, launch_log, launch_cmd = _start_scene_launch(os.path.join(run_dir, "roslaunch.log"))
-            metadata["roslaunch_command"] = launch_cmd
-            _write_metadata(metadata_path, metadata)
+            launch_proc, _launch_cmd = _start_scene_launch()
             _wait_for_roscore(launch_proc, timeout=30.0)
             _init_ros_node("scene2_dataset_collector")
-
-        metadata["scene_file"] = scene_file
-        metadata["scene_file_sha256"] = _sha256_file(scene_file)
-        metadata["status"] = "simulation_ready"
-        _write_metadata(metadata_path, metadata)
 
         topic_wait_timeout = TOPIC_TIMEOUT if args.use_existing_sim else LAUNCH_TIMEOUT
         missing_topics = _wait_for_topics(["/sensors_data_raw"], topic_wait_timeout)
         if missing_topics:
             raise RuntimeError("required topics missing: " + ", ".join(missing_topics))
 
-        bag_proc, bag_log, bag_cmd = _start_rosbag(
-            bag_path,
-            topics,
-            os.path.join(run_dir, "rosbag_record.log"),
-        )
-        metadata["rosbag_command"] = bag_cmd
-        metadata["status"] = "recording"
-        _write_metadata(metadata_path, metadata)
+        _publish_head_target(TOPIC_TIMEOUT)
+
+        bag_proc, _bag_cmd = _start_rosbag(bag_path, topics)
         time.sleep(1.0 + RECORD_SETTLE_TIME)
 
-        _publish_head_target(TOPIC_TIMEOUT)
         _set_arm_mode(ARM_MODE_EXTERNAL_CONTROL, timeout=TOPIC_TIMEOUT)
         arm_mode_changed = True
         _run_fixed_grasp_motion()
@@ -707,23 +666,13 @@ def _run_once(args, run_index=1, run_total=1):
         status = "success"
     finally:
         _terminate_process_group(bag_proc, signal.SIGINT, timeout=10)
-        if bag_log is not None:
-            bag_log.close()
         if arm_mode_changed:
             try:
                 _set_arm_mode(ARM_MODE_AUTO_SWING, timeout=TOPIC_TIMEOUT)
             except Exception as exc:
                 print(f"[WARN] failed to restore arm mode: {exc}")
         _terminate_process_group(launch_proc, signal.SIGINT, timeout=20)
-        if launch_log is not None:
-            launch_log.close()
-
-        metadata["finished_at"] = _datetime.datetime.now().isoformat()
-        metadata["status"] = status
-        if os.path.isfile(bag_path):
-            metadata["bag_size_bytes"] = os.path.getsize(bag_path)
-        _write_metadata(metadata_path, metadata)
-        print(f"[INFO] scene2 dataset run {status}: {run_dir}")
+        print(f"[INFO] scene2 dataset run {status}: {bag_path}")
 
     return 0 if status == "success" else 1
 
@@ -769,7 +718,7 @@ def build_arg_parser():
     parser.add_argument("--count", type=int, default=1, help="Number of simulation restart-and-record cycles to run.")
     parser.add_argument("--run-index", type=int, default=1, help=argparse.SUPPRESS)
     parser.add_argument("--run-total", type=int, default=1, help=argparse.SUPPRESS)
-    parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR, help="Output directory for run folders.")
+    parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR, help="Output directory for bag files.")
     parser.add_argument(
         "--duration",
         type=float,

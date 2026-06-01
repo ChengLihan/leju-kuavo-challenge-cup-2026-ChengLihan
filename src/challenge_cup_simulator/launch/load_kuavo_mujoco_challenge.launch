@@ -11,7 +11,8 @@
   <arg name="robot_type" default="2"/>
   <arg name="nodelet_robot_type" default="2"/>
   <arg name="play_back" default="false"/>
-  <arg name="raw_image" default="true"/>
+  <arg name="raw_image" default="false"/>
+  <arg name="mujoco_vsync" default="true"/>
   <arg name="use_rosbag_nodelet" default="false"/>
 
   <arg name="urdfFile" default="$(find challenge_cup_simulator)/models/biped_s52/urdf/biped_s52.urdf"/>
@@ -69,6 +70,7 @@
   <param name="use_joint_filter" value="$(arg use_joint_filter)"/>
   <param name="estimator_type" value="$(arg estimator_type)"/>
   <param name="play_back" value="$(arg play_back)"/>
+  <param name="mujoco_vsync" value="$(arg mujoco_vsync)"/>
   <param name="arm_move_spd" value="$(arg arm_move_spd)"/>
   <param name="start_way" value="$(arg start_way)"/>
   <param name="use_estimator_contact" value="$(arg use_estimator_contact)"/>

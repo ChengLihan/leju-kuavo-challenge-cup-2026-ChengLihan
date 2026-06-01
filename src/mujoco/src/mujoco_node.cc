@@ -1823,6 +1823,13 @@ int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
   sim = std::make_unique<mj::Simulate>(
       std::make_unique<mj::GlfwAdapter>(),
       &cam, &opt, &pert, /* is_passive = */ false);
+  if (nh.hasParam("mujoco_vsync"))
+  {
+    bool mujoco_vsync = true;
+    nh.getParam("mujoco_vsync", mujoco_vsync);
+    sim->vsync = mujoco_vsync ? 1 : 0;
+    ROS_INFO("[mujoco_node.cc]: MuJoCo VSync: %s", mujoco_vsync ? "true" : "false");
+  }
   signal(SIGINT, signalHandler);
   std::cout << "Physics thread started." << std::endl;
 
