@@ -24,8 +24,8 @@ DEFAULT_TOPICS = [
     "/gripper/command",
     "/gripper/state",
     "/sensors_data_raw",
+    "/joint_cmd",
     "/kuavo_arm_traj",
-    "/robot_head_motion_data",
     "/cam_h/color/image_raw/compressed",
     "/cam_l/color/image_raw/compressed",
     "/cam_r/color/image_raw/compressed",
@@ -287,6 +287,66 @@ def _publish_right_gripper_close(gripper_hold):
     gripper_hold.set_right_closed()
 
 
+class ArmTrajHold:
+    def __init__(self, pub, degrees_list, hz=ARM_TRAJ_HZ):
+        self._pub = pub
+        self._hz = float(hz)
+        self._degrees = self._validate_degrees(degrees_list)
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._thread = None
+
+    def start(self):
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(target=self._run, name="arm_traj_hold", daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+
+    def set_degrees(self, degrees_list):
+        degrees = self._validate_degrees(degrees_list)
+        with self._lock:
+            self._degrees = degrees
+
+    def _run(self):
+        import rospy
+        from sensor_msgs.msg import JointState
+
+        rate = rospy.Rate(self._hz)
+        while not self._stop_event.is_set() and not rospy.is_shutdown():
+            with self._lock:
+                degrees = list(self._degrees)
+            msg = JointState()
+            msg.header.stamp = rospy.Time.now()
+            msg.name = ARM_JOINT_NAMES
+            msg.position = degrees
+            self._pub.publish(msg)
+            rate.sleep()
+
+    @staticmethod
+    def _validate_degrees(degrees_list):
+        degrees = [float(v) for v in degrees_list]
+        if len(degrees) != len(ARM_JOINT_NAMES):
+            raise ValueError(f"arm traj command has {len(degrees)} joints, expected {len(ARM_JOINT_NAMES)}")
+        return degrees
+
+
+def _start_arm_traj_hold(timeout):
+    import rospy
+    from sensor_msgs.msg import JointState
+
+    pub = rospy.Publisher(ARM_TRAJ_TOPIC, JointState, queue_size=10)
+    _wait_for_connection(pub, timeout)
+    initial_degrees = _rad_to_deg(_read_current_arm_joints(timeout))
+    hold = ArmTrajHold(pub, initial_degrees)
+    hold.start()
+    return hold
+
+
 def _publish_arm_target_poses(target_pub, degrees_list, move_time):
     from kuavo_msgs.msg import armTargetPoses
 
@@ -296,18 +356,7 @@ def _publish_arm_target_poses(target_pub, degrees_list, move_time):
     target_pub.publish(msg)
 
 
-def _publish_arm_traj_point(traj_pub, degrees_list):
-    import rospy
-    from sensor_msgs.msg import JointState
-
-    traj_msg = JointState()
-    traj_msg.header.stamp = rospy.Time.now()
-    traj_msg.name = ARM_JOINT_NAMES
-    traj_msg.position = [float(v) for v in degrees_list]
-    traj_pub.publish(traj_msg)
-
-
-def _publish_arm_traj_interpolation(traj_pub, start_degrees, target_degrees, duration):
+def _publish_arm_traj_interpolation(arm_hold, start_degrees, target_degrees, duration):
     import rospy
 
     start = [float(v) for v in start_degrees]
@@ -322,22 +371,22 @@ def _publish_arm_traj_interpolation(traj_pub, start_degrees, target_degrees, dur
             break
         alpha = float(step) / float(steps)
         point = [start[i] + (target[i] - start[i]) * alpha for i in range(len(target))]
-        _publish_arm_traj_point(traj_pub, point)
+        arm_hold.set_degrees(point)
         if step < steps:
             rate.sleep()
 
 
-def _execute_arm_motion(target_pub, traj_pub, start_degrees, target_degrees, move_time, settle):
+def _execute_arm_motion(target_pub, arm_hold, start_degrees, target_degrees, move_time, settle):
     import rospy
 
     _publish_arm_target_poses(target_pub, target_degrees, move_time)
-    _publish_arm_traj_interpolation(traj_pub, start_degrees, target_degrees, move_time)
+    _publish_arm_traj_interpolation(arm_hold, start_degrees, target_degrees, move_time)
     rospy.sleep(settle)
 
 
-def _move_arm_to(target_pub, traj_pub, degrees_list, move_time=ARM_MOVE_TIME, settle=ARM_SETTLE_TIME):
+def _move_arm_to(target_pub, arm_hold, degrees_list, move_time=ARM_MOVE_TIME, settle=ARM_SETTLE_TIME):
     start = _rad_to_deg(_read_current_arm_joints(TOPIC_TIMEOUT))
-    _execute_arm_motion(target_pub, traj_pub, start, degrees_list, move_time, settle)
+    _execute_arm_motion(target_pub, arm_hold, start, degrees_list, move_time, settle)
 
 
 def _measure_right_pose(timeout):
@@ -451,7 +500,7 @@ def _call_right_hand_ik(
 
 def _move_right_hand_ik_once(
     target_pub,
-    traj_pub,
+    arm_hold,
     right_pos,
     right_quat,
     timeout,
@@ -473,7 +522,7 @@ def _move_right_hand_ik_once(
         pos_cost_weight=pos_cost_weight,
     )
     cmd14 = _rad_to_deg(ik_q)
-    _execute_arm_motion(target_pub, traj_pub, _rad_to_deg(current), cmd14, move_time, settle_time)
+    _execute_arm_motion(target_pub, arm_hold, _rad_to_deg(current), cmd14, move_time, settle_time)
 
     actual, actual_quat = _measure_right_pose(timeout)
     pos_err = _axis_error(actual, right_pos, (True, True, True))
@@ -488,7 +537,7 @@ def _move_right_hand_ik_once(
     return pos_err, quat_err, actual, actual_quat, cmd14
 
 
-def _pick_part_absolute(arm_pub, traj_pub, gripper_hold, job, hold_time):
+def _pick_part_absolute(arm_pub, arm_hold, gripper_hold, job, hold_time):
     import rospy
 
     grasp_target = list(job["grasp"])
@@ -499,7 +548,7 @@ def _pick_part_absolute(arm_pub, traj_pub, gripper_hold, job, hold_time):
     )
     pos_err, quat_err, actual, actual_quat, _cmd14 = _move_right_hand_ik_once(
         arm_pub,
-        traj_pub,
+        arm_hold,
         grasp_target,
         RIGHT_HAND_QUAT_XYZW,
         TOPIC_TIMEOUT,
@@ -532,7 +581,7 @@ def _pick_part_absolute(arm_pub, traj_pub, gripper_hold, job, hold_time):
     lift_target = [grasp_target[0], grasp_target[1], grasp_target[2] + LIFT_Z_OFFSET]
     lift_err, _lift_quat_err, _lift_actual, _lift_quat, _lift_cmd14 = _move_right_hand_ik_once(
         arm_pub,
-        traj_pub,
+        arm_hold,
         lift_target,
         actual_quat,
         TOPIC_TIMEOUT,
@@ -549,7 +598,7 @@ def _pick_part_absolute(arm_pub, traj_pub, gripper_hold, job, hold_time):
     )
 
 
-def _place_part_absolute(arm_pub, traj_pub, gripper_hold, job, hold_time):
+def _place_part_absolute(arm_pub, arm_hold, gripper_hold, job, hold_time):
     import rospy
 
     rospy.loginfo(
@@ -558,7 +607,7 @@ def _place_part_absolute(arm_pub, traj_pub, gripper_hold, job, hold_time):
     )
     _move_arm_to(
         arm_pub,
-        traj_pub,
+        arm_hold,
         PREGRASP_POINTS_DEG[2],
         move_time=ARM_MOVE_TIME,
         settle=FAST_GRASP_SETTLE_HOLD,
@@ -567,7 +616,7 @@ def _place_part_absolute(arm_pub, traj_pub, gripper_hold, job, hold_time):
     place_target = list(job["place"])
     place_err, quat_err, actual, _actual_quat, _cmd14 = _move_right_hand_ik_once(
         arm_pub,
-        traj_pub,
+        arm_hold,
         place_target,
         None,
         TOPIC_TIMEOUT,
@@ -589,14 +638,14 @@ def _place_part_absolute(arm_pub, traj_pub, gripper_hold, job, hold_time):
 
     _move_arm_to(
         arm_pub,
-        traj_pub,
+        arm_hold,
         PREGRASP_POINTS_DEG[2],
         move_time=ARM_MOVE_TIME,
         settle=ARM_SETTLE_TIME,
     )
 
 
-def _run_absolute_pick_place_jobs(arm_pub, traj_pub, gripper_hold, jobs, hold_time):
+def _run_absolute_pick_place_jobs(arm_pub, arm_hold, gripper_hold, jobs, hold_time):
     import rospy
 
     for index, job in enumerate(jobs, start=1):
@@ -610,41 +659,38 @@ def _run_absolute_pick_place_jobs(arm_pub, traj_pub, gripper_hold, jobs, hold_ti
             [round(v, 4) for v in job["place"]],
         )
         _publish_gripper_open(gripper_hold)
-        _pick_part_absolute(arm_pub, traj_pub, gripper_hold, job, hold_time)
-        _place_part_absolute(arm_pub, traj_pub, gripper_hold, job, hold_time)
+        _pick_part_absolute(arm_pub, arm_hold, gripper_hold, job, hold_time)
+        _place_part_absolute(arm_pub, arm_hold, gripper_hold, job, hold_time)
 
 
 def _motion_points():
     return PREGRASP_POINTS_DEG[1:], [PREGRASP_POINTS_DEG[1], PREGRASP_POINTS_DEG[0]]
 
 
-def _run_fixed_grasp_motion(gripper_hold):
+def _run_fixed_grasp_motion(gripper_hold, arm_hold):
     import rospy
-    from sensor_msgs.msg import JointState
     from kuavo_msgs.msg import armTargetPoses
 
     arm_pub = rospy.Publisher(ARM_TARGET_POSES_TOPIC, armTargetPoses, queue_size=10)
-    traj_pub = rospy.Publisher(ARM_TRAJ_TOPIC, JointState, queue_size=10)
     _wait_for_connection(arm_pub, TOPIC_TIMEOUT)
-    _wait_for_connection(traj_pub, TOPIC_TIMEOUT)
 
     _publish_gripper_open(gripper_hold)
 
     pregrasp_points, retract_points = _motion_points()
 
     for point in pregrasp_points:
-        _move_arm_to(arm_pub, traj_pub, point)
+        _move_arm_to(arm_pub, arm_hold, point)
 
     _run_absolute_pick_place_jobs(
         arm_pub,
-        traj_pub,
+        arm_hold,
         gripper_hold,
         PICK_PLACE_JOBS,
         FAST_GRASP_SETTLE_HOLD,
     )
 
     for point in retract_points:
-        _move_arm_to(arm_pub, traj_pub, point)
+        _move_arm_to(arm_pub, arm_hold, point)
     rospy.loginfo("scene2 dataset: retracted through pregrasp")
 
 
@@ -675,6 +721,7 @@ def _run_once(args, run_index=1, run_total=1):
     launch_proc = None
     bag_proc = None
     gripper_hold = None
+    arm_hold = None
     arm_mode_changed = False
     status = "failed"
     try:
@@ -695,13 +742,14 @@ def _run_once(args, run_index=1, run_total=1):
 
         _publish_head_target(TOPIC_TIMEOUT)
         gripper_hold = _start_gripper_hold(TOPIC_TIMEOUT)
+        arm_hold = _start_arm_traj_hold(TOPIC_TIMEOUT)
 
         bag_proc, _bag_cmd = _start_rosbag(bag_path, topics)
         time.sleep(1.0 + RECORD_SETTLE_TIME)
 
         _set_arm_mode(ARM_MODE_EXTERNAL_CONTROL, timeout=TOPIC_TIMEOUT)
         arm_mode_changed = True
-        _run_fixed_grasp_motion(gripper_hold)
+        _run_fixed_grasp_motion(gripper_hold, arm_hold)
         _set_arm_mode(ARM_MODE_AUTO_SWING, timeout=TOPIC_TIMEOUT)
         arm_mode_changed = False
 
@@ -711,6 +759,8 @@ def _run_once(args, run_index=1, run_total=1):
         _terminate_process_group(bag_proc, signal.SIGINT, timeout=10)
         if gripper_hold is not None:
             gripper_hold.stop()
+        if arm_hold is not None:
+            arm_hold.stop()
         if arm_mode_changed:
             try:
                 _set_arm_mode(ARM_MODE_AUTO_SWING, timeout=TOPIC_TIMEOUT)
