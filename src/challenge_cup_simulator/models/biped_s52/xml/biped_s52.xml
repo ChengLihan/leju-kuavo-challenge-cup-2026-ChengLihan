@@ -483,7 +483,7 @@
           <joint name="zhead_1_joint" pos="0 0 0" axis="0 0 1" range="-1.5708 1.5708" actuatorfrcrange="-1.5 1.5" damping="0.02"/>
           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.15 0.15 0.15 1" mesh="head_yaw"/>
           <geom pos="0 0 -0.078253" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.61176 0.65882 0.67059 1" mesh="head_rader"/>
-          <!-- MuJoCo-LiDAR: site for MjLidarWrapper(site_name="lidar_site"), inverted like CRAIC mid360. -->
+          <!-- MuJoCo-LiDAR: site for MjLidarWrapper(site_name="lidar_site"), mounted inverted for mid360 simulation. -->
           <site name="lidar_site" pos="0 0 -0.060253" quat="0 1 0 0" size="0.005" type="sphere" rgba="1 0 0 0.5" group="5"/>
           <body name="zhead_2_link">
             <inertial pos="0.0280516 0.000563 0.0355241" quat="0 0.859603 0 0.510962" mass="0.73448" diaginertia="0.00490263 0.00457039 0.00388671"/>

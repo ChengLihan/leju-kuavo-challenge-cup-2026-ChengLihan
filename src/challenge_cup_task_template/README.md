@@ -1,6 +1,6 @@
 # challenge_cup_task_template
 
-挑战杯仿真赛**选手任务模板**功能包。职责划分参考 CRAIC 的 `craic_task_template`：
+挑战杯仿真赛**选手任务模板**功能包。职责划分如下：
 
 - `challenge_cup_simulator`：只管仿真环境 / 场景 / 模型；
 - `challenge_cup_task_template`（本包）：只管选手的一键入口脚本。
@@ -45,7 +45,7 @@ challenge_cup_simulator/utils/      # 受保护包（选手不可改动）
 
 ## 关于 `--seed`（重要）
 
-挑战杯的 seed 与 CRAIC **语义不同**：
+挑战杯 seed 说明：
 
 - seed 用于选择场景实例，不随机机器人初始位姿；
 - 本地测试可自行指定 seed；
@@ -112,8 +112,8 @@ _scene_<scene>_active.xml
 
 ## 完整性校验（防篡改）
 
-每次启动时，launcher 会调用 `challenge_secret`（编译为 `.so` 的 Cython 模块，
-对标 CRAIC 的 `craic_secret`）校验场景**源输入**和启动器是否被篡改：
+每次启动时，launcher 会调用 `challenge_secret`（编译为 `.so` 的 Cython 模块）
+校验场景**源输入**和启动器是否被篡改：
 `config/scenes/scene*.yaml` + `utils/scene_builder.py` + `utils/challenge_sim_launcher.py` +
 `scripts/sim_timer.py` +
 `models/biped_s52/xml/biped_s52.xml`。
@@ -128,11 +128,11 @@ _scene_<scene>_active.xml
 > 校验调用 `_verify_integrity()` 位于受保护的 `challenge_cup_simulator/utils/challenge_sim_launcher.py`，
 > 选手无法改动该包，因此无法删改校验逻辑绕过。选手只能编辑本包（task_template）里的任务脚本。
 
-## 与 CRAIC 的差异
+## 不使用的旧接口
 
-挑战杯有**自己的** `challenge_secret`（见上），但仍**不**使用 CRAIC 的以下能力：
+挑战杯有**自己的** `challenge_secret`（见上），不使用以下旧接口：
 
 - `get_random_init_state`（随机机器人初始位姿）—— 挑战杯 seed 只做物体随机化；
-- `GripperController`（CRAIC 夹爪类）—— 挑战杯请用 `/control_robot_leju_claw` 服务及
+- `GripperController`（旧夹爪封装类）—— 挑战杯请用 `/control_robot_leju_claw` 服务及
   `/leju_claw_command`、`/leju_claw_state` 话题，参考
   `challenge_cup_simulator/scripts/sim_leju_claw_interface.py`、`leju_claw_keyboard.py`。

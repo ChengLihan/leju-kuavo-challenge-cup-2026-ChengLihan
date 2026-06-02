@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """Generate the Challenge Cup MuJoCo scene from a YAML config.
 
-This mirrors the CRAIC simulator workflow while keeping the Challenge Cup
-scene intentionally small: table, markers, sorting box, and parcels.
+The generated XML keeps Challenge Cup scenes compact and reviewable:
+table, markers, sorting boxes, task objects, and protected randomization hooks.
 """
 
 import argparse

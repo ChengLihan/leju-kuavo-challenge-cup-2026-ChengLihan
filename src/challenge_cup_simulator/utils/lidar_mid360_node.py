@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 LiDAR mid360 仿真节点：订阅 /mujoco/qpos，与当前仿真状态同步后做射线追踪，发布点云。
-需先启动 MuJoCo 仿真（如 load_kuavo_mujoco_craic.launch），并确保场景 XML 中含 lidar_site。
+需先启动 MuJoCo 仿真（如 load_kuavo_mujoco_challenge.launch），并确保场景 XML 中含 lidar_site。
 
 设计要点：
   1. 点云变换到 base_link 坐标系后发布，使 FAST_LIO 外参始终为 identity，

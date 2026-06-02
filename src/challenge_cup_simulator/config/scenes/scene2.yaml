@@ -2,7 +2,7 @@ extends: "scene1.yaml"
 scene_name: "Challenge Cup Scene 2"
 
 # Scene 2: 3-type, 6-part sorting task.
-# Type A/B reuse CRAIC part meshes. Type C uses the screwdriver model.
+# Type A/B use pipe-fitting part meshes. Type C uses the screwdriver model.
 materials:
   sorting_area_a_mat:
     rgba: "0.04 0.38 0.86 0.86"
