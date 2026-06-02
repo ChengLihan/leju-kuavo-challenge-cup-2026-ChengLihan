@@ -11,7 +11,7 @@
 # 编译后 source 工作空间
 rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3
 rosrun challenge_cup_task_template challenge_task.py --scene scene2 --seed 3
-rosrun challenge_cup_task_template challenge_task.py --scene scene3
+rosrun challenge_cup_task_template challenge_task.py --scene scene3 --seed 3
 ```
 
 该脚本会自动：

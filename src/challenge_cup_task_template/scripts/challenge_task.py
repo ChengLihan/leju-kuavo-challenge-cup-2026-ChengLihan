@@ -5,7 +5,7 @@
 推荐运行方式：
   rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3
   rosrun challenge_cup_task_template challenge_task.py --scene scene2 --seed 3
-  rosrun challenge_cup_task_template challenge_task.py --scene scene3
+  rosrun challenge_cup_task_template challenge_task.py --scene scene3 --seed 3
 """
 
 import argparse
@@ -58,12 +58,12 @@ def run_scene(scene, seed, node_name=None, timeout=120):
     from sensor_msgs.msg import JointState
 
     rospy.loginfo("=== %s任务启动 ===", config["title"])
-    rospy.loginfo("seed=%s", seed)
 
     cmd_vel_pub = rospy.Publisher("/cmd_vel", Twist, queue_size=10)
     arm_traj_pub = rospy.Publisher("/kuavo_arm_traj", JointState, queue_size=10)
 
     rospy.sleep(1.0)
+    rospy.loginfo("场景实例已初始化。")
 
     # ========================================
     # TODO: 在此实现三场景共用或按 scene 分支的任务逻辑

@@ -81,7 +81,6 @@ objects:
     model_file: "../../models/charging_tray/model.xml"
     asset_path_prefix: "../../charging_tray"
     asset_scale: "0.9090909090909092 0.9090909090909092 1.0714285714285714"
-    # CRAIC preset 0: lower layer, local X=0.35, Y=+0.067, Z=0.75, with rack yawed 90 deg.
     pos: "0.983 0.35 0.75"
     euler: "1.5708 0 1.5708"
     movable: true
@@ -91,7 +90,6 @@ objects:
     model_file: "../../models/charging_tray/model.xml"
     asset_path_prefix: "../../charging_tray"
     asset_scale: "0.9090909090909092 0.9090909090909092 1.0714285714285714"
-    # CRAIC preset 0: lower layer, local X=0.15, Y=+0.067, Z=0.75, with rack yawed 90 deg.
     pos: "0.983 0.15 0.75"
     euler: "1.5708 0 1.5708"
     movable: true
@@ -101,7 +99,6 @@ objects:
     model_file: "../../models/charging_tray/model.xml"
     asset_path_prefix: "../../charging_tray"
     asset_scale: "0.9090909090909092 0.9090909090909092 1.0714285714285714"
-    # CRAIC preset 0: upper layer, local X=0.05, Y=+0.067, Z=1.15, with rack yawed 90 deg.
     pos: "0.983 0.05 1.15"
     euler: "1.5708 0 1.5708"
     movable: true
@@ -111,7 +108,6 @@ objects:
     model_file: "../../models/charging_tray/model.xml"
     asset_path_prefix: "../../charging_tray"
     asset_scale: "0.9090909090909092 0.9090909090909092 1.0714285714285714"
-    # CRAIC preset 0: upper layer, local X=0.25, Y=+0.067, Z=1.15, with rack yawed 90 deg.
     pos: "0.983 0.25 1.15"
     euler: "1.5708 0 1.5708"
     movable: true
@@ -121,7 +117,6 @@ objects:
     model_file: "../../models/charging_tray/model.xml"
     asset_path_prefix: "../../charging_tray"
     asset_scale: "0.9090909090909092 0.9090909090909092 1.0714285714285714"
-    # CRAIC preset 0: upper layer, local X=-0.15, Y=+0.067, Z=1.15, with rack yawed 90 deg.
     pos: "0.983 -0.15 1.15"
     euler: "1.5708 0 1.5708"
     movable: true

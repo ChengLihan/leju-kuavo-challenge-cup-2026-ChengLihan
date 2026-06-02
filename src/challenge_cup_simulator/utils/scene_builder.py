@@ -936,9 +936,7 @@ def main():
     parser.add_argument("--all", action="store_true", help="generate all config/scenes/scene*.yaml files")
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--no-randomize", action="store_true",
-                        help="生成静态场景，不做构建期随机化（物体留在基准位）。"
-                             "用于运行时摆放(C 方案)：真实位置由 set_object_position 在运行时设置，"
-                             "不写进可读 XML。")
+                        help="生成静态场景，不做构建期实例化；用于受保护的场景初始化流程。")
     parser.add_argument("--robot-version", default=os.environ.get("ROBOT_VERSION", "52"))
     args = parser.parse_args()
     build_seed = None if args.no_randomize else args.seed

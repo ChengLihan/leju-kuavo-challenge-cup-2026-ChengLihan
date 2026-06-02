@@ -280,11 +280,4 @@ randomization:
   jitter_parts:
     names: []
   shuffleable_parts:
-    names:
-      - "part_type_a_1"
-      - "part_type_a_2"
-      - "part_type_b_1"
-      - "part_type_b_2"
-      - "part_type_c_1"
-      - "part_type_c_2"
-    xy_offset: 0.015
+    names: []

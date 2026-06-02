@@ -217,9 +217,6 @@ objects:
 
 randomization:
   jitter_parts:
-    names:
-      - "parcel_1"
-      - "parcel_2"
-      - "parcel_3"
-      - "parcel_4"
-    y_offset: 0.03
+    names: []
+  shuffleable_parts:
+    names: []
