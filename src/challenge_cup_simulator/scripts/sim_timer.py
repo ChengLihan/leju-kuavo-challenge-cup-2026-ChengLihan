@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-比赛计时器调试入口。
+比赛计时器单独运行入口。
 
-正式启动链路由 challenge_sim_launcher 自动拉起 .so 内的计时器；本脚本只用于单独调试。
+正式启动链路由 challenge_sim_launcher 自动拉起 .so 内的计时器；本脚本只用于单独查看或验证计时器。
 """
 
 import argparse
@@ -22,11 +22,11 @@ def _load_secret():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="挑战杯计时器调试入口")
+    parser = argparse.ArgumentParser(description="挑战杯计时器单独运行入口")
     parser.add_argument("--time-limit", type=float, default=0.0,
                         help="比赛时长，单位秒；0 表示不限时")
     parser.add_argument("--enforce", action="store_true",
-                        help="到时结束目标节点；调试时默认不启用")
+                        help="到时结束目标节点；默认不启用")
     parser.add_argument("--target-node", default="",
                         help="到时结束的 ROS 节点名")
     parser.add_argument("--target-pid", type=int, default=0,

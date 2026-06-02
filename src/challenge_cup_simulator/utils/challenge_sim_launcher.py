@@ -16,7 +16,7 @@
 要点：
   - 启动前用 challenge_secret(.so) 校验场景源文件完整性（防篡改），失败则拒绝启动。
   - seed 用于选择场景实例；正式评测日志会脱敏。
-  - 启动 .so 内的计时器；比赛模式到时结束任务，调试模式只显示用时。
+  - 启动 .so 内的计时器；设置比赛时长时到时结束任务，未设置时只显示用时。
   - scene_builder 生成本次启动使用的场景 XML。
   - 生成的基准 XML 写入 challenge_cup_simulator 包内的 xml 目录（不是 /tmp），
     因为 XML 里的 include/mesh/texture 都是相对该 XML 文件位置的相对路径，放别处会加载失败。
@@ -56,7 +56,7 @@ class ChallengeSimLauncher:
     """挑战杯仿真环境自动启动器"""
 
     def __init__(self, scene, seed=0, robot_version=None,
-                 match_time_limit=None, debug_time=None, timer_gui=None):
+                 match_time_limit=None, timer_gui=None):
         """
         Args:
             scene: "scene1" / "scene2" / "scene3"
@@ -65,7 +65,6 @@ class ChallengeSimLauncher:
                 故固定默认 52，且**不**从 ROBOT_VERSION 环境变量读取——
                 否则选手可借环境变量切到无哈希基线的版本，绕过完整性校验。
             match_time_limit: 比赛时长（秒）；None 时读取 CHALLENGE_TIME_LIMIT。
-            debug_time: True 时只显示计时、不按时长结束任务；评测模式会忽略该选项。
             timer_gui: 是否弹出计时器窗口；None 时读取 CHALLENGE_TIMER_GUI。
         """
         if scene not in VALID_SCENES:
@@ -81,10 +80,6 @@ class ChallengeSimLauncher:
         self._sim_pkg_path = None
         self._scene_file = None
         self.match_time_limit = self._read_time_limit(match_time_limit)
-        self.debug_time = (
-            os.environ.get("CHALLENGE_TIMER_DEBUG", "0") == "1"
-            if debug_time is None else bool(debug_time)
-        )
         self.timer_gui = (
             os.environ.get("CHALLENGE_TIMER_GUI", "1") != "0"
             if timer_gui is None else bool(timer_gui)
@@ -401,11 +396,11 @@ class ChallengeSimLauncher:
         import rospy
 
         if os.environ.get("CHALLENGE_TIMER_DISABLE", "0") == "1" and not _eval_mode():
-            rospy.logwarn("challenge_sim_launcher: 比赛计时器已在调试环境禁用。")
+            rospy.logwarn("challenge_sim_launcher: 比赛计时器已通过环境变量禁用。")
             return
 
         lib_dir = os.path.join(self._sim_pkg_path, "lib")
-        enforce = self.match_time_limit > 0.0 and (not self.debug_time or _eval_mode())
+        enforce = self.match_time_limit > 0.0
         gui = self.timer_gui
         code = (
             "import sys; "
@@ -438,10 +433,10 @@ class ChallengeSimLauncher:
                 rospy.logfatal("challenge_sim_launcher: 比赛计时器启动失败，禁止继续运行。")
                 self.stop()
                 sys.exit(1)
-            rospy.logwarn("challenge_sim_launcher: 比赛计时器启动失败，调试模式继续运行。")
+            rospy.logwarn("challenge_sim_launcher: 比赛计时器启动失败，不限时模式继续运行。")
             self._timer_proc = None
             return
-        mode = "比赛模式" if enforce else "调试模式"
+        mode = "限时模式" if enforce else "不限时显示模式"
         limit = "%.1fs" % self.match_time_limit if self.match_time_limit > 0.0 else "不限时"
         rospy.loginfo("challenge_sim_launcher: 比赛计时器已启动（%s，%s）。", mode, limit)
 

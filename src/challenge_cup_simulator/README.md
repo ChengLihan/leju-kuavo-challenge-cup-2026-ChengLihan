@@ -78,15 +78,18 @@ config/scenes/scene3.yaml
 rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3 --time-limit 120
 ```
 
-仿真已经启动后，也可以单独运行计时器做本地调试：
+仿真已经启动后，也可以单独运行计时器做本地查看或验证：
 
 ```bash
 rosrun challenge_cup_simulator sim_timer.py --time-limit 120
 rosrun challenge_cup_simulator sim_timer.py --time-limit 120 --no-gui
 ```
 
-计时器使用 `/sensors_data_raw` 中的仿真时间作为计时基准，因此仿真暂停、卡顿或实时率变化
-不会改变比赛用时口径。单独的 `sim_timer.py` 只是调试包装；正式启动链路由受保护启动器自动拉起计时器。
+计时单位是秒，`--time-limit 120` 表示 120 秒。计时器使用 `/sensors_data_raw`
+中的仿真时间作为计时基准，因此仿真暂停、卡顿或实时率变化不会改变比赛用时口径。
+设置 `--time-limit` 后，到时会自动结束当前任务节点；不设置时长时只显示用时，不自动结束。
+单独的 `sim_timer.py` 只是薄包装；正式启动链路由受保护启动器自动拉起计时器。
+计时器窗口支持单次 `Stop Timer`，只冻结计时显示，便于比赛完成后由裁判查看用时。
 
 ## LiDAR
 

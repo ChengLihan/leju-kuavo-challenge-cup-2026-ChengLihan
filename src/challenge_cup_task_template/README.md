@@ -59,24 +59,24 @@ challenge_cup_simulator/utils/      # 受保护包（选手不可改动）
 默认行为：
 
 - 未设置时长：只显示用时，不自动结束任务；
-- 设置 `--time-limit`：比赛模式下到时自动结束当前任务节点；
-- 设置 `--debug-time`：调试模式，只显示计时，超过时长也继续运行；
+- 设置 `--time-limit`：到时自动结束当前任务节点；
 - 设置 `--no-timer-gui`：不弹出窗口，仅保留后台计时日志；
-- 正式评测 `CHALLENGE_EVAL_MODE=1` 下会忽略调试开关，到时结束任务。
+- 计时器窗口里的 `Stop Timer` 是单次冻结，只停止计时显示，用于比赛结束后由裁判查看用时；
+- `--time-limit` 的单位是秒，例如 `--time-limit 120` 表示 120 秒。
 
 ```bash
 # 到 120 秒自动结束任务
 rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3 --time-limit 120
 
-# 调试：显示计时，但超过时长也不结束任务
-rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3 --time-limit 120 --debug-time
+# 不设置时长：只显示用时，不自动结束任务
+rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3
 
 # 不弹出窗口，仅保留后台计时
 rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3 --time-limit 120 --no-timer-gui
 ```
 
 正式评测可由组委会设置 `CHALLENGE_TIME_LIMIT` 和 `CHALLENGE_EVAL_MODE=1`。
-评测模式下会忽略调试开关，到时结束任务。
+设置时长后，到时会自动结束任务。
 
 也可以通过环境变量设置默认时长：
 

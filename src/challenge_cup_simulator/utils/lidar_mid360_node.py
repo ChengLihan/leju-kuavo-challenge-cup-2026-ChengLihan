@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 LiDAR mid360 仿真节点：订阅 /mujoco/qpos，与当前仿真状态同步后做射线追踪，发布点云。
-需先启动 MuJoCo 仿真（如 load_kuavo_mujoco_challenge.launch），并确保场景 XML 中含 lidar_site。
+需先启动 MuJoCo 仿真（如 load_kuavo_mujoco_craic.launch），并确保场景 XML 中含 lidar_site。
 
 设计要点：
   1. 点云变换到 base_link 坐标系后发布，使 FAST_LIO 外参始终为 identity，
@@ -25,6 +25,9 @@ _script_dir = os.path.dirname(os.path.abspath(__file__))
 _ws_lib = os.path.dirname(_script_dir)
 _devel = os.path.dirname(_ws_lib)
 _ws_root = os.path.dirname(_devel)
+_mujoco_lidar = os.path.join(_ws_root, "src", "MuJoCo-LiDAR")
+if os.path.isdir(_mujoco_lidar) and _mujoco_lidar not in sys.path:
+    sys.path.insert(0, _mujoco_lidar)
 
 
 def _prepend_if_dir(path, added):
@@ -82,95 +85,12 @@ except ImportError:
 
 try:
     import mujoco
+    from mujoco_lidar import MjLidarWrapper
     from mujoco_lidar import scan_gen
-    try:
-        from mujoco_lidar import MjLidarWrapper
-    except ImportError:
-        MjLidarWrapper = None
 except ImportError:
-    print(
-        "lidar_mid360: 缺少 mujoco/mujoco_lidar。"
-        "请先安装 Python 依赖，例如："
-        "pip3 install --no-deps -r src/challenge_cup_simulator/requirements.txt",
-        file=sys.stderr,
-    )
+    print("lidar_mid360: 缺少 mujoco/mujoco_lidar。", file=sys.stderr)
     traceback.print_exc(file=sys.stderr)
     sys.exit(1)
-
-
-class _CpuMjLidarWrapper(object):
-    """CPU LiDAR wrapper compatible with mujoco_lidar.MjLidarWrapper.
-
-    PyPI mujoco-lidar 0.2.x keeps scan_gen, but its wheel/sdist can miss
-    mujoco_lidar.core_cpu. The CPU path is small and uses MuJoCo mj_multiRay
-    directly, matching CRAIC's backend behavior while keeping the dependency
-    installed from pip.
-    """
-
-    def __init__(self, mj_model, site_name, cutoff_dist=100.0, args=None):
-        args = args or {}
-        self.mj_model = mj_model
-        self.site_name = site_name
-        self.cutoff_dist = cutoff_dist
-        self.geomgroup = args.get("geomgroup", None)
-        self.bodyexclude = args.get("bodyexclude", -1)
-        self._sensor_pose = np.eye(4, dtype=np.float32)
-        self._hit_points = None
-        self._dist = None
-
-    @property
-    def sensor_position(self):
-        return self._sensor_pose[:3, 3].copy()
-
-    @property
-    def sensor_rotation(self):
-        return self._sensor_pose[:3, :3].copy()
-
-    def _update_sensor_pose(self, mj_data):
-        site = mj_data.site(self.site_name)
-        self._sensor_pose[:3, :3] = site.xmat.reshape(3, 3)
-        self._sensor_pose[:3, 3] = site.xpos
-
-    def trace_rays(self, mj_data, ray_theta, ray_phi):
-        if ray_phi.shape[0] != ray_theta.shape[0]:
-            raise ValueError("ray_phi and ray_theta must have the same shape")
-
-        self._update_sensor_pose(mj_data)
-        nray = ray_phi.shape[0]
-        self._dist = np.full(nray, self.cutoff_dist, dtype=np.float64)
-        geomid = np.full(nray, 0, dtype=np.int32)
-
-        site_pos = self._sensor_pose[:3, 3]
-        site_mat = self._sensor_pose[:3, :3]
-        pnt = np.array([site_pos], dtype=np.float64).T
-
-        x = np.cos(ray_phi) * np.cos(ray_theta)
-        y = np.cos(ray_phi) * np.sin(ray_theta)
-        z = np.sin(ray_phi)
-        local_vecs = np.stack((x, y, z), axis=-1).astype(np.float64, copy=False)
-        world_vecs = local_vecs @ site_mat.T
-        world_vecs /= np.linalg.norm(world_vecs, axis=1, keepdims=True)
-
-        mujoco.mj_multiRay(
-            m=self.mj_model,
-            d=mj_data,
-            pnt=pnt,
-            vec=np.ascontiguousarray(world_vecs).ravel(),
-            geomgroup=self.geomgroup,
-            flg_static=1,
-            bodyexclude=self.bodyexclude,
-            geomid=geomid,
-            dist=self._dist,
-            nray=nray,
-            cutoff=self.cutoff_dist,
-        )
-
-        self._dist[geomid == -1] = 0.0
-        self._hit_points = (local_vecs * self._dist[:, np.newaxis]).astype(np.float32, copy=False)
-        return self._dist
-
-    def get_hit_points(self):
-        return self._hit_points
 
 
 def _publish_livox(pub, points, frame_id, stamp):
@@ -260,10 +180,10 @@ def _publish_pointcloud2(pub, points, frame_id, stamp, time_mode="zero", scan_du
     pub.publish(msg)
 
 
-def _build_raw_imu_msg(sensor_msg):
+def _build_raw_imu_msg(sensor_msg, stamp):
     """由 kuavo_msgs/sensorsData 构造未滤波 IMU 消息。"""
     imu_out = Imu()
-    imu_out.header.stamp = sensor_msg.sensor_time
+    imu_out.header.stamp = stamp
     # 与现有 /imu_data 保持同一 frame_id，减少后端配置变更
     imu_out.header.frame_id = "dummy_link"
     imu_out.orientation = sensor_msg.imu_data.quat
@@ -282,7 +202,7 @@ def main():
     if not scene_path:
         pkg_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         scene_path = os.path.normpath(os.path.join(
-            pkg_path, "models", "biped_s52", "xml", "scene1.xml"
+            pkg_path, "..", "models", "biped_s47", "xml", "scene.xml"
         ))
         if not os.path.isfile(scene_path):
             rospy.logerr("lidar_mid360: 未找到场景 XML，请设置 legged_robot_scene_param。")
@@ -303,7 +223,7 @@ def main():
         rospy.logerr("lidar_mid360: 场景中未找到 site '%s'", site_name)
         sys.exit(1)
 
-    backend     = rospy.get_param("~backend", "cpu").strip().lower()
+    backend     = rospy.get_param("~backend", "cpu")
     cutoff_dist = rospy.get_param("~cutoff_dist", 50.0)
 
     use_geomgroup = rospy.get_param("~use_geomgroup", True)
@@ -319,24 +239,13 @@ def main():
         lidar_args = {"bodyexclude": base_body_id}
         rospy.loginfo("lidar_mid360: bodyexclude=%d", base_body_id)
 
-    if backend == "cpu":
-        lidar = _CpuMjLidarWrapper(
-            mj_model,
-            site_name=site_name,
-            cutoff_dist=cutoff_dist,
-            args=lidar_args,
-        )
-    else:
-        if MjLidarWrapper is None:
-            rospy.logerr("lidar_mid360: 当前环境缺少 mujoco_lidar.MjLidarWrapper，无法使用 backend=%s", backend)
-            sys.exit(1)
-        lidar = MjLidarWrapper(
-            mj_model,
-            site_name=site_name,
-            backend=backend,
-            cutoff_dist=cutoff_dist,
-            args=lidar_args,
-        )
+    lidar = MjLidarWrapper(
+        mj_model,
+        site_name=site_name,
+        backend=backend,
+        cutoff_dist=cutoff_dist,
+        args=lidar_args,
+    )
     livox = scan_gen.LivoxGenerator("mid360")
 
     output_type = rospy.get_param("~output_type", "pointcloud2").strip().lower()
@@ -347,6 +256,10 @@ def main():
     livox_topic = rospy.get_param("~livox_topic", "/livox/lidar")
     pc2_topic = rospy.get_param("~pc2_topic", "/lidar/points")
     pc2_time_mode = rospy.get_param("~pc2_time_mode", "last_nonzero").strip().lower()
+    stamp_mode = rospy.get_param("~stamp_mode", "wall_time").strip().lower()
+    if stamp_mode not in ("sensor_time", "wall_time"):
+        rospy.logwarn("lidar_mid360: 未知 stamp_mode=%s，回退到 wall_time", stamp_mode)
+        stamp_mode = "wall_time"
 
     livox_pub = None
     pc2_pub = None
@@ -372,8 +285,8 @@ def main():
 
     scan_duration_us = 1e6 / max(rate_hz, 1e-6)
     rospy.loginfo(
-        "lidar_mid360: mid360，site=%s，%g Hz，output=%s，pc2_topic=%s，livox_topic=%s，frame=%s，raw_imu_topic=%s，pc2_time_mode=%s",
-        site_name, rate_hz, output_type, pc2_topic, livox_topic, lidar_frame, raw_imu_topic, pc2_time_mode
+        "lidar_mid360: mid360，site=%s，%g Hz，output=%s，pc2_topic=%s，livox_topic=%s，frame=%s，raw_imu_topic=%s，pc2_time_mode=%s，stamp_mode=%s",
+        site_name, rate_hz, output_type, pc2_topic, livox_topic, lidar_frame, raw_imu_topic, pc2_time_mode, stamp_mode
     )
 
     # _last_qpos_holder: (stamp, qpos_array)
@@ -383,14 +296,18 @@ def main():
     _latest_sensor_stamp_holder = [None]
 
     def on_sensor(msg):
-        _latest_sensor_stamp_holder[0] = msg.sensor_time
-        raw_imu_pub.publish(_build_raw_imu_msg(msg))
+        stamp = rospy.Time.now() if stamp_mode == "wall_time" else msg.sensor_time
+        _latest_sensor_stamp_holder[0] = stamp
+        raw_imu_pub.publish(_build_raw_imu_msg(msg, stamp))
 
     def on_qpos(msg):
         if len(msg.data) >= nq:
-            t = _latest_sensor_stamp_holder[0]
-            if t is None:
+            if stamp_mode == "wall_time":
                 t = rospy.Time.now()
+            else:
+                t = _latest_sensor_stamp_holder[0]
+                if t is None:
+                    t = rospy.Time.now()
             _last_qpos_holder[0] = (t, np.array(msg.data[:nq], dtype=np.float64))
 
     rospy.Subscriber("/sensors_data_raw", KuavoSensorsData, on_sensor, queue_size=100)
