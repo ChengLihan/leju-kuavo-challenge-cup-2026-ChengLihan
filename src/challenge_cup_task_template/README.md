@@ -18,7 +18,7 @@ rosrun challenge_cup_task_template challenge_task.py --scene scene3
 
 1. 调用受保护的 `challenge_sim_launcher.py` 生成静态场景 XML；
 2. `roslaunch challenge_cup_simulator load_kuavo_mujoco_challenge.launch`（自带 roscore）启动仿真；
-3. 通过 `challenge_secret*.so` 按 seed 计算运行时物体位置，并写入 MuJoCo 内存；
+3. 通过受保护模块完成场景初始化；
 4. 锁定物体摆放服务并启动作弊监控；
 5. 初始化 ROS 节点并等待 `/sensors_data_raw` 出现确认就绪；
 6. 进入脚本里的 TODO 任务逻辑区，由选手填写。
@@ -46,10 +46,9 @@ challenge_cup_simulator/utils/      # 受保护包（选手不可改动）
 
 挑战杯的 seed 与 CRAIC **语义不同**：
 
-- seed 不随机机器人初始位姿；
-- scene1：4 个包裹在各自基准位附近做 y 方向随机抖动；
-- scene2：6 个零件按 seed 打乱摆放；
-- scene3：当前无随机化配置，保留 seed 参数用于接口一致性。
+- seed 用于选择场景实例，不随机机器人初始位姿；
+- 本地测试可自行指定 seed；
+- 正式评测 seed 由组委会指定，选手不需要依赖具体随机规则。
 
 ## 稳定控制参数（重要）
 

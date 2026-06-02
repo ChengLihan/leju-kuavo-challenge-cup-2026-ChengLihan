@@ -15,8 +15,7 @@
 
 要点：
   - 启动前用 challenge_secret(.so) 校验场景源文件完整性（防篡改），失败则拒绝启动。
-  - seed 用于 challenge_secret(.so) 的运行时物体布局：scene1 做包裹 Y 向抖动，
-    scene2 做零件 shuffle + 抖动；scene3 无随机化。
+  - seed 用于 challenge_secret(.so) 的运行时场景实例初始化。
   - scene_builder 只生成静态基准 XML，真实随机位置由仿真启动后写入 MuJoCo 内存。
   - 生成的基准 XML 写入 challenge_cup_simulator 包内的 xml 目录（不是 /tmp），
     因为 XML 里的 include/mesh/texture 都是相对该 XML 文件位置的相对路径，放别处会加载失败。
@@ -87,7 +86,7 @@ class ChallengeSimLauncher:
         流程：
           1. 定位 challenge_cup_simulator 包路径；
           2. 校验场景源文件完整性（challenge_secret，防篡改）；
-          3. 调用 scene_builder.py 生成带 seed 的场景 XML（写入包内 xml 目录）；
+          3. 调用 scene_builder.py 生成静态场景 XML（写入包内 xml 目录）；
           4. roslaunch（自带 roscore），显式带稳定控制参数 + sceneFile 绝对路径；
           5. 等待 roscore 就绪并初始化 ROS 节点；
           6. 等待 /sensors_data_raw 出现，确认仿真就绪。
@@ -199,7 +198,7 @@ class ChallengeSimLauncher:
         print("[INFO] challenge_sim_launcher: 场景源文件校验通过。")
 
     def _build_scene_xml(self):
-        """调用 scene_builder.py 生成带 seed 的场景 XML，返回其绝对路径。
+        """调用 scene_builder.py 生成静态场景 XML，返回其绝对路径。
 
         生成文件放在 simulator 包内的 xml 目录，与原始 sceneN.xml 同级，
         以保证 XML 中 include/mesh/texture 的相对路径仍然有效。

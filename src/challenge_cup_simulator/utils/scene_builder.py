@@ -830,18 +830,42 @@ class SceneBuilder:
 
         shuffle_cfg = rand_cfg.get("shuffleable_parts", {})
         names = shuffle_cfg.get("names", []) if isinstance(shuffle_cfg, dict) else shuffle_cfg
-        if names and len(names) >= 2:
+        groups = shuffle_cfg.get("groups", []) if isinstance(shuffle_cfg, dict) else []
+        if groups:
             xy_offset = float(shuffle_cfg.get("xy_offset", 0.0)) if isinstance(shuffle_cfg, dict) else 0.0
             orientation_keys = ("quat", "euler", "axisangle", "xyaxes", "zaxis")
+            for group in groups:
+                group_names = group.get("names", []) if isinstance(group, dict) else group
+                if len(group_names) < 2:
+                    continue
+                slots = []
+                for name in group_names:
+                    obj = by_name.get(name)
+                    if obj:
+                        x, y, z = self._float_list(obj.get("pos", "0 0 0"), 3)
+                        orientation = {key: obj[key] for key in orientation_keys if key in obj}
+                        slots.append((x, y, z, orientation))
+                rng.shuffle(slots)
+                for name, (x, y, z, orientation) in zip(group_names, slots):
+                    obj = by_name.get(name)
+                    if not obj:
+                        continue
+                    x += rng.uniform(-xy_offset, xy_offset)
+                    y += rng.uniform(-xy_offset, xy_offset)
+                    obj["pos"] = f"{x:.3f} {y:.3f} {z:.3f}"
+                    for key in orientation_keys:
+                        obj.pop(key, None)
+                    obj.update(orientation)
+        elif names and len(names) >= 2:
+            xy_offset = float(shuffle_cfg.get("xy_offset", 0.0)) if isinstance(shuffle_cfg, dict) else 0.0
             positions = []
             for name in names:
                 obj = by_name.get(name)
                 if obj:
                     x, y, _ = self._float_list(obj.get("pos", "0 0 0"), 3)
-                    orientation = {key: obj[key] for key in orientation_keys if key in obj}
-                    positions.append((x, y, orientation))
+                    positions.append((x, y))
             rng.shuffle(positions)
-            for name, (x, y, orientation) in zip(names, positions):
+            for name, (x, y) in zip(names, positions):
                 obj = by_name.get(name)
                 if not obj:
                     continue
@@ -849,9 +873,6 @@ class SceneBuilder:
                 x += rng.uniform(-xy_offset, xy_offset)
                 y += rng.uniform(-xy_offset, xy_offset)
                 obj["pos"] = f"{x:.3f} {y:.3f} {z:.3f}"
-                for key in orientation_keys:
-                    obj.pop(key, None)
-                obj.update(orientation)
 
         jitter_cfg = rand_cfg.get("jitter_parts", {})
         jitter_names = jitter_cfg.get("names", []) if isinstance(jitter_cfg, dict) else jitter_cfg

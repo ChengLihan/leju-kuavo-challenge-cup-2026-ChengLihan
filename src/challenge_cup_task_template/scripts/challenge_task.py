@@ -17,17 +17,14 @@ SCENE_CONFIGS = {
     "scene1": {
         "node_name": "challenge_task_scene1",
         "title": "场景一：包裹称重与摆放",
-        "seed_help": "scene1：4 个包裹在各自基准位附近做 y 方向随机抖动",
     },
     "scene2": {
         "node_name": "challenge_task_scene2",
         "title": "场景二：分拣归档",
-        "seed_help": "scene2：打乱 6 个零件的摆放位置",
     },
     "scene3": {
         "node_name": "challenge_task_scene3",
         "title": "场景三：SMT 料盘出库",
-        "seed_help": "scene3：当前无随机化配置，保留 seed 参数用于接口一致性",
     },
 }
 
@@ -61,7 +58,7 @@ def run_scene(scene, seed, node_name=None, timeout=120):
     from sensor_msgs.msg import JointState
 
     rospy.loginfo("=== %s任务启动 ===", config["title"])
-    rospy.loginfo("seed=%s；%s", seed, config["seed_help"])
+    rospy.loginfo("seed=%s", seed)
 
     cmd_vel_pub = rospy.Publisher("/cmd_vel", Twist, queue_size=10)
     arm_traj_pub = rospy.Publisher("/kuavo_arm_traj", JointState, queue_size=10)
@@ -101,7 +98,7 @@ def main():
     parser.add_argument("--scene", choices=sorted(SCENE_CONFIGS), default="scene1",
                         help="要启动的比赛场景")
     parser.add_argument("--seed", type=int, default=0,
-                        help="随机种子；scene1/scene2 有效，scene3 当前保留为兼容参数")
+                        help="场景种子；正式评测 seed 由组委会指定")
     parser.add_argument("--node-name", default=None,
                         help="ROS 节点名；默认按 scene 自动设置")
     parser.add_argument("--timeout", type=int, default=120,
