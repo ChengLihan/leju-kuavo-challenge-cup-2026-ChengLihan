@@ -23,7 +23,7 @@
     <material name="parcel_tape_mat" rgba="0.92 0.78 0.43 1" specular="0.04" shininess="0.02"/>
     <material name="parcel_label_mat" rgba="0.96 0.96 0.88 1" specular="0.02" shininess="0.02"/>
     <material name="parcel_label_line_mat" rgba="0.12 0.12 0.10 1" specular="0.01" shininess="0.01"/>
-    <material name="weighing_area_mat" rgba="0.10 0.45 0.90 0.85" emission="0.15"/>
+    <material name="weighing_area_mat" rgba="0.10 0.62 0.26 0.85" emission="0.15"/>
     <material name="drop_box_mat" rgba="0.10 0.62 0.34 0.55" emission="0.08"/>
     <material name="drop_box_edge_mat" rgba="0.02 0.28 0.15 1"/>
     <material name="smt_rack_rack_metal" rgba="0.6 0.6 0.65 1" specular="0.5" shininess="0.3"/>
@@ -63,13 +63,14 @@
       <geom name="challenge_table_leg_1" type="cylinder" size="0.03 0.4" pos="0.35 -0.65 0.4" material="table_leg_mat" mass="2"/>
       <geom name="challenge_table_leg_2" type="cylinder" size="0.03 0.4" pos="-0.35 0.65 0.4" material="table_leg_mat" mass="2"/>
       <geom name="challenge_table_leg_3" type="cylinder" size="0.03 0.4" pos="-0.35 -0.65 0.4" material="table_leg_mat" mass="2"/>
-      <body name="sorting_box_0p4_0p3_0p3" pos="0.16 0 0.83" euler="0 0 1.5708">
-        <geom name="sorting_box_0p4_0p3_0p3_floor" type="box" size="0.2 0.15 0.008" pos="0 0 0.008" material="drop_box_mat" contype="0" conaffinity="0"/>
-        <geom name="sorting_box_0p4_0p3_0p3_front_wall" type="box" size="0.2 0.012 0.15" pos="0 -0.162 0.15" material="drop_box_edge_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_box_0p4_0p3_0p3_back_wall" type="box" size="0.2 0.012 0.15" pos="0 0.162 0.15" material="drop_box_edge_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_box_0p4_0p3_0p3_left_wall" type="box" size="0.012 0.15 0.15" pos="-0.212 0 0.15" material="drop_box_edge_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_box_0p4_0p3_0p3_right_wall" type="box" size="0.012 0.15 0.15" pos="0.212 0 0.15" material="drop_box_edge_mat" contype="1" conaffinity="1"/>
-      </body>
+    </body>
+    <body name="sorting_box_0p4_0p3_0p3" pos="-2.39 0 0.83" euler="0 0 1.5708">
+      <freejoint name="sorting_box_0p4_0p3_0p3"/>
+      <geom name="sorting_box_0p4_0p3_0p3_floor" type="box" size="0.2 0.15 0.008" pos="0 0 0.008" material="drop_box_mat" contype="1" conaffinity="1" mass="0.28" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_box_0p4_0p3_0p3_front_wall" type="box" size="0.2 0.012 0.15" pos="0 -0.162 0.15" material="drop_box_edge_mat" contype="1" conaffinity="1" mass="0.13" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_box_0p4_0p3_0p3_back_wall" type="box" size="0.2 0.012 0.15" pos="0 0.162 0.15" material="drop_box_edge_mat" contype="1" conaffinity="1" mass="0.13" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_box_0p4_0p3_0p3_left_wall" type="box" size="0.012 0.15 0.15" pos="-0.212 0 0.15" material="drop_box_edge_mat" contype="1" conaffinity="1" mass="0.13" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_box_0p4_0p3_0p3_right_wall" type="box" size="0.012 0.15 0.15" pos="0.212 0 0.15" material="drop_box_edge_mat" contype="1" conaffinity="1" mass="0.13" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
     </body>
     <body name="smt_rack" pos="1.05 0 0" euler="0 0 1.5708">
       <body name="smt_rack_tray_rack">

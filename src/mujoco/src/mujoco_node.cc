@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -25,6 +26,7 @@
 #include <string>
 #include <thread>
 #include <ostream>
+#include <array>
 #include <mujoco/mujoco.h>
 #include "glfw_adapter.h"
 #include "simulate.h"
@@ -509,6 +511,209 @@ namespace
       d->ctrl[i] = 0;
     }
   }
+
+  bool nameContains(const mjModel *model, int obj_type, int id, const std::string &needle)
+  {
+    const char *name = mj_id2name(model, obj_type, id);
+    return name && std::string(name).find(needle) != std::string::npos;
+  }
+
+  bool isGripperContactGeom(const mjModel *model, int geom_id)
+  {
+    if (geom_id < 0 || geom_id >= model->ngeom) {
+      return false;
+    }
+
+    if (nameContains(model, mjOBJ_GEOM, geom_id, "_pad") ||
+        nameContains(model, mjOBJ_GEOM, geom_id, "finger")) {
+      return true;
+    }
+
+    const int body_id = model->geom_bodyid[geom_id];
+    return nameContains(model, mjOBJ_BODY, body_id, "_pad") ||
+           nameContains(model, mjOBJ_BODY, body_id, "finger");
+  }
+
+  bool isTouchingGripper(const mjModel *model, const mjData *data, int parcel_geom_id)
+  {
+    for (int i = 0; i < data->ncon; ++i) {
+      const mjContact &contact = data->contact[i];
+      if (contact.geom1 == parcel_geom_id && isGripperContactGeom(model, contact.geom2)) {
+        return true;
+      }
+      if (contact.geom2 == parcel_geom_id && isGripperContactGeom(model, contact.geom1)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool isStableParcel(const mjModel *model, const mjData *data, int parcel_geom_id, double area_z)
+  {
+    const int body_id = model->geom_bodyid[parcel_geom_id];
+    if (body_id < 0 || body_id >= model->nbody || model->body_jntnum[body_id] <= 0) {
+      return false;
+    }
+
+    const double *center = data->geom_xpos + 3 * parcel_geom_id;
+    if (center[2] < area_z + 0.02 || center[2] > area_z + 0.12) {
+      return false;
+    }
+
+    const int joint_id = model->body_jntadr[body_id];
+    if (joint_id < 0 || model->jnt_type[joint_id] != mjJNT_FREE) {
+      return false;
+    }
+
+    const int dof_addr = model->jnt_dofadr[joint_id];
+    if (dof_addr < 0 || dof_addr + 5 >= model->nv) {
+      return false;
+    }
+
+    const double linear_speed = std::sqrt(
+        data->qvel[dof_addr + 0] * data->qvel[dof_addr + 0] +
+        data->qvel[dof_addr + 1] * data->qvel[dof_addr + 1] +
+        data->qvel[dof_addr + 2] * data->qvel[dof_addr + 2]);
+    const double angular_speed = std::sqrt(
+        data->qvel[dof_addr + 3] * data->qvel[dof_addr + 3] +
+        data->qvel[dof_addr + 4] * data->qvel[dof_addr + 4] +
+        data->qvel[dof_addr + 5] * data->qvel[dof_addr + 5]);
+
+    return linear_speed < 0.05 && angular_speed < 0.8;
+  }
+
+  struct FootprintCheck {
+    bool full_inside = false;
+    bool overlaps = false;
+  };
+
+  FootprintCheck checkParcelFootprint(
+      const mjModel *model,
+      const mjData *data,
+      int parcel_geom_id,
+      double area_x,
+      double area_y,
+      double area_half_x,
+      double area_half_y)
+  {
+    constexpr double kTolerance = 0.002;
+    const double min_x = area_x - area_half_x;
+    const double max_x = area_x + area_half_x;
+    const double min_y = area_y - area_half_y;
+    const double max_y = area_y + area_half_y;
+
+    const double *size = model->geom_size + 3 * parcel_geom_id;
+    const double *center = data->geom_xpos + 3 * parcel_geom_id;
+    const double *mat = data->geom_xmat + 9 * parcel_geom_id;
+
+    bool full_inside = true;
+    double parcel_min_x = 1e9;
+    double parcel_max_x = -1e9;
+    double parcel_min_y = 1e9;
+    double parcel_max_y = -1e9;
+
+    for (double sx : {-1.0, 1.0}) {
+      for (double sy : {-1.0, 1.0}) {
+        for (double sz : {-1.0, 1.0}) {
+          const double lx = sx * size[0];
+          const double ly = sy * size[1];
+          const double lz = sz * size[2];
+          const double wx = center[0] + mat[0] * lx + mat[1] * ly + mat[2] * lz;
+          const double wy = center[1] + mat[3] * lx + mat[4] * ly + mat[5] * lz;
+
+          parcel_min_x = std::min(parcel_min_x, wx);
+          parcel_max_x = std::max(parcel_max_x, wx);
+          parcel_min_y = std::min(parcel_min_y, wy);
+          parcel_max_y = std::max(parcel_max_y, wy);
+
+          if (wx < min_x - kTolerance || wx > max_x + kTolerance ||
+              wy < min_y - kTolerance || wy > max_y + kTolerance) {
+            full_inside = false;
+          }
+        }
+      }
+    }
+
+    const bool overlaps =
+        parcel_max_x >= min_x - kTolerance &&
+        parcel_min_x <= max_x + kTolerance &&
+        parcel_max_y >= min_y - kTolerance &&
+        parcel_min_y <= max_y + kTolerance;
+
+    return {full_inside, overlaps};
+  }
+
+  void setWeighingAreaColor(mjModel *model, int area_geom_id, bool success)
+  {
+    const std::array<float, 4> green = {0.10f, 0.62f, 0.26f, 0.85f};
+    const std::array<float, 4> yellow = {0.95f, 0.78f, 0.08f, 0.90f};
+    const auto &rgba = success ? yellow : green;
+    const int mat_id = model->geom_matid[area_geom_id];
+
+    if (mat_id >= 0) {
+      for (int i = 0; i < 4; ++i) {
+        model->mat_rgba[4 * mat_id + i] = rgba[i];
+      }
+      return;
+    }
+
+    for (int i = 0; i < 4; ++i) {
+      model->geom_rgba[4 * area_geom_id + i] = rgba[i];
+    }
+  }
+
+  void updateScene1WeighingAreaIndicator(mjModel *model, const mjData *data)
+  {
+    struct Cache {
+      const mjModel *model = nullptr;
+      int area_geom = -1;
+      std::array<int, 4> parcel_geoms = {-1, -1, -1, -1};
+    };
+    static Cache cache;
+
+    if (cache.model != model) {
+      cache.model = model;
+      cache.area_geom = mj_name2id(model, mjOBJ_GEOM, "weighing_area_0p2m_square");
+      for (int i = 0; i < 4; ++i) {
+        const std::string name = "parcel_" + std::to_string(i + 1) + "_geom";
+        cache.parcel_geoms[i] = mj_name2id(model, mjOBJ_GEOM, name.c_str());
+      }
+    }
+
+    if (cache.area_geom < 0) {
+      return;
+    }
+
+    const double *area_center = data->geom_xpos + 3 * cache.area_geom;
+    const double *area_size = model->geom_size + 3 * cache.area_geom;
+
+    int full_stable_released_count = 0;
+    int overlapping_count = 0;
+
+    for (int parcel_geom_id : cache.parcel_geoms) {
+      if (parcel_geom_id < 0) {
+        continue;
+      }
+
+      const FootprintCheck footprint = checkParcelFootprint(
+          model, data, parcel_geom_id,
+          area_center[0], area_center[1], area_size[0], area_size[1]);
+
+      if (footprint.overlaps) {
+        ++overlapping_count;
+      }
+
+      if (footprint.full_inside &&
+          isStableParcel(model, data, parcel_geom_id, area_center[2]) &&
+          !isTouchingGripper(model, data, parcel_geom_id)) {
+        ++full_stable_released_count;
+      }
+    }
+
+    const bool success = (full_stable_released_count == 1 && overlapping_count == 1);
+    setWeighingAreaColor(model, cache.area_geom, success);
+  }
+
   Eigen::Vector3d removeGravity(const Eigen::Vector3d &rawAccel, const Eigen::Quaterniond &orientation)
   {
     // 设置重力向量在全局坐标系中的方向，假设重力向量的方向为 (0, 0, -9.81)
@@ -855,6 +1060,7 @@ namespace
           // ********************************
 
           mj_forward(m, d);
+          updateScene1WeighingAreaIndicator(m, d);
 
         }
         else
@@ -899,6 +1105,7 @@ namespace
           if (!sim.run)
           {
             mj_forward(m, d);
+            updateScene1WeighingAreaIndicator(m, d);
             sim.speed_changed = true;
             ROS_WARN_STREAM_THROTTLE(1.0, "Sim is not running, forward and publish data");
             publish_ros_data(d, sim.run);
@@ -1097,6 +1304,7 @@ namespace
             }
 
             mj_step(m, d);
+            updateScene1WeighingAreaIndicator(m, d);
             step_count++;
             sim_time += ros::Duration(1 / frequency);
             sim.AddToHistory();

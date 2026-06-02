@@ -70,7 +70,7 @@ materials:
     specular: "0.01"
     shininess: "0.01"
   weighing_area_mat:
-    rgba: "0.10 0.45 0.90 0.85"
+    rgba: "0.10 0.62 0.26 0.85"
     emission: "0.15"
   drop_box_mat:
     rgba: "0.10 0.62 0.34 0.55"
@@ -155,8 +155,13 @@ objects:
 
   - type: "open_box"
     name: "sorting_box_0p4_0p3_0p3"
-    parent: "challenge_table"
-    pos: "0.05 0.49 0.83"
+    pos: "0.10 0.29 0.83"
+    movable: true
+    mass: 0.80
+    friction: "1.8 0.6 0.02"
+    condim: "6"
+    solref: "0.012 1.2"
+    solimp: "0.95 0.99 0.001"
     inner_size: "0.40 0.30 0.30"
     wall_thickness: 0.024
     floor_thickness: 0.016

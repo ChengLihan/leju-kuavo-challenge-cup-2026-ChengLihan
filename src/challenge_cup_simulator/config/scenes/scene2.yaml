@@ -102,8 +102,13 @@ objects:
 
   - type: "tapered_open_box"
     name: "sorting_bin_a"
-    parent: "challenge_table"
-    pos: "-0.09 -0.43 0.830"
+    pos: "-0.04 -0.43 0.830"
+    movable: true
+    mass: 0.80
+    friction: "1.8 0.6 0.02"
+    condim: "6"
+    solref: "0.012 1.2"
+    solimp: "0.95 0.99 0.001"
     inner_size: "0.20 0.22 0.14"
     wall_thickness: 0.012
     floor_thickness: 0.010
@@ -116,8 +121,13 @@ objects:
 
   - type: "tapered_open_box"
     name: "sorting_bin_b"
-    parent: "challenge_table"
-    pos: "-0.09 0.00 0.830"
+    pos: "-0.04 0.00 0.830"
+    movable: true
+    mass: 0.80
+    friction: "1.8 0.6 0.02"
+    condim: "6"
+    solref: "0.012 1.2"
+    solimp: "0.95 0.99 0.001"
     inner_size: "0.20 0.22 0.14"
     wall_thickness: 0.012
     floor_thickness: 0.010
@@ -130,8 +140,13 @@ objects:
 
   - type: "tapered_open_box"
     name: "sorting_bin_c"
-    parent: "challenge_table"
-    pos: "-0.09 0.43 0.830"
+    pos: "-0.04 0.43 0.830"
+    movable: true
+    mass: 0.80
+    friction: "1.8 0.6 0.02"
+    condim: "6"
+    solref: "0.012 1.2"
+    solimp: "0.95 0.99 0.001"
     inner_size: "0.20 0.22 0.14"
     wall_thickness: 0.012
     floor_thickness: 0.010

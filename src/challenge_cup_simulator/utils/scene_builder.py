@@ -195,6 +195,19 @@ class SceneBuilder:
             return self.bodies.get(parent_name, self.worldbody)
         return self.worldbody
 
+    def _body_parent(self, obj):
+        return self.worldbody if obj.get("movable", False) else self._parent(obj)
+
+    @staticmethod
+    def _movable_geom_attrs(obj, mass):
+        if not obj.get("movable", False):
+            return {}
+        attrib = {"mass": f"{mass:g}"}
+        for key in ("friction", "condim", "solref", "solimp"):
+            if key in obj:
+                attrib[key] = str(obj[key])
+        return attrib
+
     def _add_table(self, obj, name):
         body = ET.SubElement(self.worldbody, "body", name=name, pos=str(obj.get("pos", "0 0 0")))
         self.bodies[name] = body
@@ -242,11 +255,16 @@ class SceneBuilder:
         attrib = {"name": name, "pos": str(obj.get("pos", "0 0 0"))}
         if "euler" in obj:
             attrib["euler"] = str(obj["euler"])
-        body = ET.SubElement(self._parent(obj), "body", **attrib)
+        body = ET.SubElement(self._body_parent(obj), "body", **attrib)
+        if obj.get("movable", False):
+            ET.SubElement(body, "freejoint", name=name)
         self.bodies[name] = body
         length, width, height = self._float_list(obj.get("inner_size", "0.40 0.30 0.30"), 3)
         wall = float(obj.get("wall_thickness", 0.024))
         floor = float(obj.get("floor_thickness", 0.016))
+        total_mass = float(obj.get("mass", 1.0))
+        floor_mass = float(obj.get("floor_mass", total_mass * 0.35))
+        wall_mass = float(obj.get("wall_mass", max(total_mass - floor_mass, 0.0) / 4.0))
         half_x = length / 2.0
         half_y = width / 2.0
         half_z = height / 2.0
@@ -263,8 +281,9 @@ class SceneBuilder:
             size=f"{half_x:g} {half_y:g} {floor_half:g}",
             pos=f"0 0 {floor_half:g}",
             material=floor_mat,
-            contype="0",
-            conaffinity="0",
+            contype=str(obj.get("floor_contype", 1 if obj.get("movable", False) else 0)),
+            conaffinity=str(obj.get("floor_conaffinity", 1 if obj.get("movable", False) else 0)),
+            **self._movable_geom_attrs(obj, floor_mass),
         )
         wall_specs = [
             ("front_wall", half_x, wall_half, half_z, 0, -(half_y + wall_half), half_z),
@@ -283,13 +302,16 @@ class SceneBuilder:
                 material=wall_mat,
                 contype="1",
                 conaffinity="1",
+                **self._movable_geom_attrs(obj, wall_mass),
             )
 
     def _add_tapered_open_box(self, obj, name):
         attrib = {"name": name, "pos": str(obj.get("pos", "0 0 0"))}
         if "euler" in obj:
             attrib["euler"] = str(obj["euler"])
-        body = ET.SubElement(self._parent(obj), "body", **attrib)
+        body = ET.SubElement(self._body_parent(obj), "body", **attrib)
+        if obj.get("movable", False):
+            ET.SubElement(body, "freejoint", name=name)
         self.bodies[name] = body
 
         length, width, height = self._float_list(obj.get("inner_size", "0.24 0.22 0.10"), 3)
@@ -312,18 +334,6 @@ class SceneBuilder:
         lip_center_offset = math.tan(lip_tilt) * lip_half_z / 2.0
         floor_mat = str(obj.get("floor_material", obj.get("material", "drop_box_mat")))
         wall_mat = str(obj.get("wall_material", obj.get("material", "drop_box_edge_mat")))
-
-        ET.SubElement(
-            body,
-            "geom",
-            name=f"{name}_floor",
-            type="box",
-            size=f"{half_x:g} {half_y:g} {floor_half:g}",
-            pos=f"0 0 {floor_half:g}",
-            material=floor_mat,
-            contype="1",
-            conaffinity="1",
-        )
 
         wall_specs = [
             (
@@ -381,6 +391,22 @@ class SceneBuilder:
                     ),
                 ]
             )
+        total_mass = float(obj.get("mass", 0.8))
+        floor_mass = float(obj.get("floor_mass", total_mass * 0.25))
+        wall_mass = float(obj.get("wall_mass", max(total_mass - floor_mass, 0.0) / max(len(wall_specs), 1)))
+
+        ET.SubElement(
+            body,
+            "geom",
+            name=f"{name}_floor",
+            type="box",
+            size=f"{half_x:g} {half_y:g} {floor_half:g}",
+            pos=f"0 0 {floor_half:g}",
+            material=floor_mat,
+            contype="1",
+            conaffinity="1",
+            **self._movable_geom_attrs(obj, floor_mass),
+        )
         for suffix, size, pos, euler in wall_specs:
             attrib = {
                 "name": f"{name}_{suffix}",
@@ -393,6 +419,7 @@ class SceneBuilder:
             }
             if euler:
                 attrib["euler"] = euler
+            attrib.update(self._movable_geom_attrs(obj, wall_mass))
             ET.SubElement(body, "geom", **attrib)
 
     def _add_front_low_back_high_box(self, body, obj, name, length, width, height, wall, floor):
@@ -412,6 +439,9 @@ class SceneBuilder:
         front_mat = str(obj.get("front_material", obj.get("wall_material", obj.get("material", "drop_box_edge_mat"))))
         wall_mat = str(obj.get("wall_material", obj.get("material", "drop_box_edge_mat")))
         floor_mat = str(obj.get("floor_material", obj.get("material", "drop_box_mat")))
+        total_mass = float(obj.get("mass", 0.8))
+        floor_mass = float(obj.get("floor_mass", total_mass * 0.25))
+        wall_mass = float(obj.get("wall_mass", max(total_mass - floor_mass, 0.0) / 6.0))
 
         ET.SubElement(
             body,
@@ -423,6 +453,7 @@ class SceneBuilder:
             material=floor_mat,
             contype="1",
             conaffinity="1",
+            **self._movable_geom_attrs(obj, floor_mass),
         )
 
         wall_specs = [
@@ -474,6 +505,7 @@ class SceneBuilder:
                 material=material,
                 contype="1",
                 conaffinity="1",
+                **self._movable_geom_attrs(obj, wall_mass),
             )
 
     def _add_parcel(self, obj, name):

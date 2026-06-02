@@ -23,7 +23,7 @@
     <material name="parcel_tape_mat" rgba="0.92 0.78 0.43 1" specular="0.04" shininess="0.02"/>
     <material name="parcel_label_mat" rgba="0.96 0.96 0.88 1" specular="0.02" shininess="0.02"/>
     <material name="parcel_label_line_mat" rgba="0.12 0.12 0.10 1" specular="0.01" shininess="0.01"/>
-    <material name="weighing_area_mat" rgba="0.10 0.45 0.90 0.85" emission="0.15"/>
+    <material name="weighing_area_mat" rgba="0.10 0.62 0.26 0.85" emission="0.15"/>
     <material name="drop_box_mat" rgba="0.10 0.62 0.34 0.55" emission="0.08"/>
     <material name="drop_box_edge_mat" rgba="0.02 0.28 0.15 1"/>
     <material name="sorting_area_a_mat" rgba="0.04 0.38 0.86 0.86" emission="0.12"/>
@@ -73,33 +73,36 @@
       <geom name="challenge_table_leg_1" type="cylinder" size="0.03 0.4" pos="0.35 -0.65 0.4" material="table_leg_mat" mass="2"/>
       <geom name="challenge_table_leg_2" type="cylinder" size="0.03 0.4" pos="-0.35 0.65 0.4" material="table_leg_mat" mass="2"/>
       <geom name="challenge_table_leg_3" type="cylinder" size="0.03 0.4" pos="-0.35 -0.65 0.4" material="table_leg_mat" mass="2"/>
-      <body name="sorting_bin_a" pos="-0.09 -0.43 0.830">
-        <geom name="sorting_bin_a_floor" type="box" size="0.1 0.11 0.005" pos="0 0 0.005" material="sorting_area_a_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_bin_a_front_low_wall" type="box" size="0.006 0.11 0.03" pos="-0.106 0 0.04" material="sorting_bin_a_wall_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_bin_a_back_high_wall" type="box" size="0.006 0.11 0.0725" pos="0.106 0 0.0825" material="sorting_bin_a_wall_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_bin_a_left_low_side" type="box" size="0.1 0.006 0.03" pos="0 0.116 0.04" material="sorting_bin_a_wall_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_bin_a_right_low_side" type="box" size="0.1 0.006 0.03" pos="0 -0.116 0.04" material="sorting_bin_a_wall_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_bin_a_left_rear_high_side" type="box" size="0.045 0.006 0.0725" pos="0.055 0.116 0.0825" material="sorting_bin_a_wall_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_bin_a_right_rear_high_side" type="box" size="0.045 0.006 0.0725" pos="0.055 -0.116 0.0825" material="sorting_bin_a_wall_mat" contype="1" conaffinity="1"/>
-      </body>
-      <body name="sorting_bin_b" pos="-0.09 0.00 0.830">
-        <geom name="sorting_bin_b_floor" type="box" size="0.1 0.11 0.005" pos="0 0 0.005" material="sorting_area_b_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_bin_b_front_low_wall" type="box" size="0.006 0.11 0.03" pos="-0.106 0 0.04" material="sorting_bin_b_wall_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_bin_b_back_high_wall" type="box" size="0.006 0.11 0.0725" pos="0.106 0 0.0825" material="sorting_bin_b_wall_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_bin_b_left_low_side" type="box" size="0.1 0.006 0.03" pos="0 0.116 0.04" material="sorting_bin_b_wall_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_bin_b_right_low_side" type="box" size="0.1 0.006 0.03" pos="0 -0.116 0.04" material="sorting_bin_b_wall_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_bin_b_left_rear_high_side" type="box" size="0.045 0.006 0.0725" pos="0.055 0.116 0.0825" material="sorting_bin_b_wall_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_bin_b_right_rear_high_side" type="box" size="0.045 0.006 0.0725" pos="0.055 -0.116 0.0825" material="sorting_bin_b_wall_mat" contype="1" conaffinity="1"/>
-      </body>
-      <body name="sorting_bin_c" pos="-0.09 0.43 0.830">
-        <geom name="sorting_bin_c_floor" type="box" size="0.1 0.11 0.005" pos="0 0 0.005" material="sorting_area_c_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_bin_c_front_low_wall" type="box" size="0.006 0.11 0.03" pos="-0.106 0 0.04" material="sorting_bin_c_wall_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_bin_c_back_high_wall" type="box" size="0.006 0.11 0.0725" pos="0.106 0 0.0825" material="sorting_bin_c_wall_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_bin_c_left_low_side" type="box" size="0.1 0.006 0.03" pos="0 0.116 0.04" material="sorting_bin_c_wall_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_bin_c_right_low_side" type="box" size="0.1 0.006 0.03" pos="0 -0.116 0.04" material="sorting_bin_c_wall_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_bin_c_left_rear_high_side" type="box" size="0.045 0.006 0.0725" pos="0.055 0.116 0.0825" material="sorting_bin_c_wall_mat" contype="1" conaffinity="1"/>
-        <geom name="sorting_bin_c_right_rear_high_side" type="box" size="0.045 0.006 0.0725" pos="0.055 -0.116 0.0825" material="sorting_bin_c_wall_mat" contype="1" conaffinity="1"/>
-      </body>
+    </body>
+    <body name="sorting_bin_a" pos="-0.04 -0.43 0.830">
+      <freejoint name="sorting_bin_a"/>
+      <geom name="sorting_bin_a_floor" type="box" size="0.1 0.11 0.005" pos="0 0 0.005" material="sorting_area_a_mat" contype="1" conaffinity="1" mass="0.2" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_a_front_low_wall" type="box" size="0.006 0.11 0.03" pos="-0.106 0 0.04" material="sorting_bin_a_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_a_back_high_wall" type="box" size="0.006 0.11 0.0725" pos="0.106 0 0.0825" material="sorting_bin_a_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_a_left_low_side" type="box" size="0.1 0.006 0.03" pos="0 0.116 0.04" material="sorting_bin_a_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_a_right_low_side" type="box" size="0.1 0.006 0.03" pos="0 -0.116 0.04" material="sorting_bin_a_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_a_left_rear_high_side" type="box" size="0.045 0.006 0.0725" pos="0.055 0.116 0.0825" material="sorting_bin_a_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_a_right_rear_high_side" type="box" size="0.045 0.006 0.0725" pos="0.055 -0.116 0.0825" material="sorting_bin_a_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+    </body>
+    <body name="sorting_bin_b" pos="-0.04 0.00 0.830">
+      <freejoint name="sorting_bin_b"/>
+      <geom name="sorting_bin_b_floor" type="box" size="0.1 0.11 0.005" pos="0 0 0.005" material="sorting_area_b_mat" contype="1" conaffinity="1" mass="0.2" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_b_front_low_wall" type="box" size="0.006 0.11 0.03" pos="-0.106 0 0.04" material="sorting_bin_b_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_b_back_high_wall" type="box" size="0.006 0.11 0.0725" pos="0.106 0 0.0825" material="sorting_bin_b_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_b_left_low_side" type="box" size="0.1 0.006 0.03" pos="0 0.116 0.04" material="sorting_bin_b_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_b_right_low_side" type="box" size="0.1 0.006 0.03" pos="0 -0.116 0.04" material="sorting_bin_b_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_b_left_rear_high_side" type="box" size="0.045 0.006 0.0725" pos="0.055 0.116 0.0825" material="sorting_bin_b_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_b_right_rear_high_side" type="box" size="0.045 0.006 0.0725" pos="0.055 -0.116 0.0825" material="sorting_bin_b_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+    </body>
+    <body name="sorting_bin_c" pos="-0.04 0.43 0.830">
+      <freejoint name="sorting_bin_c"/>
+      <geom name="sorting_bin_c_floor" type="box" size="0.1 0.11 0.005" pos="0 0 0.005" material="sorting_area_c_mat" contype="1" conaffinity="1" mass="0.2" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_c_front_low_wall" type="box" size="0.006 0.11 0.03" pos="-0.106 0 0.04" material="sorting_bin_c_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_c_back_high_wall" type="box" size="0.006 0.11 0.0725" pos="0.106 0 0.0825" material="sorting_bin_c_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_c_left_low_side" type="box" size="0.1 0.006 0.03" pos="0 0.116 0.04" material="sorting_bin_c_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_c_right_low_side" type="box" size="0.1 0.006 0.03" pos="0 -0.116 0.04" material="sorting_bin_c_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_c_left_rear_high_side" type="box" size="0.045 0.006 0.0725" pos="0.055 0.116 0.0825" material="sorting_bin_c_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_c_right_rear_high_side" type="box" size="0.045 0.006 0.0725" pos="0.055 -0.116 0.0825" material="sorting_bin_c_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
     </body>
     <body name="part_type_a_1" pos="-0.28 -0.35 0.803" euler="0 0 0.05">
       <freejoint name="part_type_a_1"/>

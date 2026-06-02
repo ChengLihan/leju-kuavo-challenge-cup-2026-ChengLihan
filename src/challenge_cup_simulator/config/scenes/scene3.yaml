@@ -60,9 +60,14 @@ objects:
 
   - type: "open_box"
     name: "sorting_box_0p4_0p3_0p3"
-    parent: "challenge_table"
-    pos: "0.16 0 0.83"
+    pos: "-2.39 0 0.83"
     euler: "0 0 1.5708"
+    movable: true
+    mass: 0.80
+    friction: "1.8 0.6 0.02"
+    condim: "6"
+    solref: "0.012 1.2"
+    solimp: "0.95 0.99 0.001"
     inner_size: "0.40 0.30 0.30"
     wall_thickness: 0.024
     floor_thickness: 0.016
