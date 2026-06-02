@@ -16,6 +16,7 @@
 要点：
   - 启动前用 challenge_secret(.so) 校验场景源文件完整性（防篡改），失败则拒绝启动。
   - seed 用于选择场景实例；正式评测日志会脱敏。
+  - 启动 .so 内的计时器；比赛模式到时结束任务，调试模式只显示用时。
   - scene_builder 生成本次启动使用的场景 XML。
   - 生成的基准 XML 写入 challenge_cup_simulator 包内的 xml 目录（不是 /tmp），
     因为 XML 里的 include/mesh/texture 都是相对该 XML 文件位置的相对路径，放别处会加载失败。
@@ -54,7 +55,8 @@ def _eval_mode():
 class ChallengeSimLauncher:
     """挑战杯仿真环境自动启动器"""
 
-    def __init__(self, scene, seed=0, robot_version=None):
+    def __init__(self, scene, seed=0, robot_version=None,
+                 match_time_limit=None, debug_time=None, timer_gui=None):
         """
         Args:
             scene: "scene1" / "scene2" / "scene3"
@@ -62,6 +64,9 @@ class ChallengeSimLauncher:
             robot_version: 机器人版本号（默认 52）。挑战杯只发布 biped_s52，
                 故固定默认 52，且**不**从 ROBOT_VERSION 环境变量读取——
                 否则选手可借环境变量切到无哈希基线的版本，绕过完整性校验。
+            match_time_limit: 比赛时长（秒）；None 时读取 CHALLENGE_TIME_LIMIT。
+            debug_time: True 时只显示计时、不按时长结束任务；评测模式会忽略该选项。
+            timer_gui: 是否弹出计时器窗口；None 时读取 CHALLENGE_TIMER_GUI。
         """
         if scene not in VALID_SCENES:
             print(f"[FATAL] challenge_sim_launcher: 非法场景 '{scene}'，"
@@ -72,8 +77,18 @@ class ChallengeSimLauncher:
         self.robot_version = robot_version or 52
         self._launch_proc = None
         self._cheat_monitor_proc = None
+        self._timer_proc = None
         self._sim_pkg_path = None
         self._scene_file = None
+        self.match_time_limit = self._read_time_limit(match_time_limit)
+        self.debug_time = (
+            os.environ.get("CHALLENGE_TIMER_DEBUG", "0") == "1"
+            if debug_time is None else bool(debug_time)
+        )
+        self.timer_gui = (
+            os.environ.get("CHALLENGE_TIMER_GUI", "1") != "0"
+            if timer_gui is None else bool(timer_gui)
+        )
 
     # ------------------------------------------------------------------ #
     # 主流程
@@ -119,9 +134,22 @@ class ChallengeSimLauncher:
         # 完成受保护的场景实例初始化。
         self._place_objects()
         self._start_cheat_monitor()
+        self._start_match_timer(target_node=rospy.get_name())
 
     def stop(self):
         """关闭仿真环境（终止整个 roslaunch 进程组）"""
+        if self._timer_proc is not None:
+            print("[INFO] challenge_sim_launcher: 关闭比赛计时器...")
+            try:
+                os.killpg(os.getpgid(self._timer_proc.pid), signal.SIGTERM)
+                self._timer_proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                os.killpg(os.getpgid(self._timer_proc.pid), signal.SIGKILL)
+                self._timer_proc.wait(timeout=2)
+            except Exception:
+                pass
+            self._timer_proc = None
+
         if self._cheat_monitor_proc is not None:
             print("[INFO] challenge_sim_launcher: 关闭反作弊监控...")
             try:
@@ -149,6 +177,13 @@ class ChallengeSimLauncher:
     # ------------------------------------------------------------------ #
     # 内部辅助
     # ------------------------------------------------------------------ #
+    def _read_time_limit(self, value=None):
+        raw = os.environ.get("CHALLENGE_TIME_LIMIT", "0") if value is None else value
+        try:
+            return max(0.0, float(raw))
+        except (TypeError, ValueError):
+            return 0.0
+
     def _find_sim_pkg_path(self):
         """定位 challenge_cup_simulator 包路径（优先 rospkg，回退到源码相对路径）"""
         try:
@@ -360,6 +395,55 @@ class ChallengeSimLauncher:
             self.stop()
             sys.exit(1)
         rospy.loginfo("challenge_sim_launcher: 反作弊监控已启动。")
+
+    def _start_match_timer(self, target_node):
+        """启动 .so 内的比赛计时器。"""
+        import rospy
+
+        if os.environ.get("CHALLENGE_TIMER_DISABLE", "0") == "1" and not _eval_mode():
+            rospy.logwarn("challenge_sim_launcher: 比赛计时器已在调试环境禁用。")
+            return
+
+        lib_dir = os.path.join(self._sim_pkg_path, "lib")
+        enforce = self.match_time_limit > 0.0 and (not self.debug_time or _eval_mode())
+        gui = self.timer_gui
+        code = (
+            "import sys; "
+            "sys.path.insert(0, sys.argv[1]); "
+            "import challenge_secret; "
+            "challenge_secret.run_match_timer("
+            "time_limit=float(sys.argv[2]), "
+            "enforce=(sys.argv[3] == '1'), "
+            "gui=(sys.argv[4] == '1'), "
+            "target_node=sys.argv[5], "
+            "target_pid=int(sys.argv[6]), "
+            "eval_mode=(sys.argv[7] == '1'))"
+        )
+        cmd = [
+            sys.executable,
+            "-c",
+            code,
+            lib_dir,
+            str(self.match_time_limit),
+            "1" if enforce else "0",
+            "1" if gui else "0",
+            target_node or "",
+            str(os.getpid()),
+            "1" if _eval_mode() else "0",
+        ]
+        self._timer_proc = subprocess.Popen(cmd, preexec_fn=os.setsid)
+        time.sleep(0.5)
+        if self._timer_proc.poll() is not None:
+            if enforce or _eval_mode():
+                rospy.logfatal("challenge_sim_launcher: 比赛计时器启动失败，禁止继续运行。")
+                self.stop()
+                sys.exit(1)
+            rospy.logwarn("challenge_sim_launcher: 比赛计时器启动失败，调试模式继续运行。")
+            self._timer_proc = None
+            return
+        mode = "比赛模式" if enforce else "调试模式"
+        limit = "%.1fs" % self.match_time_limit if self.match_time_limit > 0.0 else "不限时"
+        rospy.loginfo("challenge_sim_launcher: 比赛计时器已启动（%s，%s）。", mode, limit)
 
     def _wait_for_roscore(self, timeout):
         """等待 roscore 就绪"""

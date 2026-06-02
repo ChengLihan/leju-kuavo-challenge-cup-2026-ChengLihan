@@ -43,14 +43,21 @@ def _load_launcher():
     return ChallengeSimLauncher
 
 
-def run_scene(scene, seed, node_name=None, timeout=120):
+def run_scene(scene, seed, node_name=None, timeout=120,
+              time_limit=None, debug_time=False, timer_gui=True):
     if scene not in SCENE_CONFIGS:
         raise ValueError("unknown scene: {}".format(scene))
 
     config = SCENE_CONFIGS[scene]
     ChallengeSimLauncher = _load_launcher()
 
-    launcher = ChallengeSimLauncher(scene=scene, seed=seed)
+    launcher = ChallengeSimLauncher(
+        scene=scene,
+        seed=seed,
+        match_time_limit=time_limit,
+        debug_time=debug_time,
+        timer_gui=timer_gui,
+    )
     launcher.start(node_name=node_name or config["node_name"], timeout=timeout)
 
     import rospy
@@ -103,9 +110,23 @@ def main():
                         help="ROS 节点名；默认按 scene 自动设置")
     parser.add_argument("--timeout", type=int, default=120,
                         help="等待仿真就绪的超时时间，单位秒")
+    parser.add_argument("--time-limit", type=float, default=None,
+                        help="比赛时长，单位秒；默认读取 CHALLENGE_TIME_LIMIT，未设置则不限时")
+    parser.add_argument("--debug-time", action="store_true",
+                        help="调试模式：显示计时但不因超时结束任务；正式评测会忽略该选项")
+    parser.add_argument("--no-timer-gui", action="store_true",
+                        help="不弹出计时器窗口，仅保留后台计时日志")
     args = parser.parse_args()
 
-    run_scene(scene=args.scene, seed=args.seed, node_name=args.node_name, timeout=args.timeout)
+    run_scene(
+        scene=args.scene,
+        seed=args.seed,
+        node_name=args.node_name,
+        timeout=args.timeout,
+        time_limit=args.time_limit,
+        debug_time=args.debug_time,
+        timer_gui=not args.no_timer_gui,
+    )
 
 
 if __name__ == "__main__":

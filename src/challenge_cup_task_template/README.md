@@ -20,8 +20,9 @@ rosrun challenge_cup_task_template challenge_task.py --scene scene3 --seed 3
 2. `roslaunch challenge_cup_simulator load_kuavo_mujoco_challenge.launch`（自带 roscore）启动仿真；
 3. 通过受保护模块完成场景初始化；
 4. 锁定物体摆放服务并启动作弊监控；
-5. 初始化 ROS 节点并等待 `/sensors_data_raw` 出现确认就绪；
-6. 进入脚本里的 TODO 任务逻辑区，由选手填写。
+5. 启动比赛计时器；
+6. 初始化 ROS 节点并等待 `/sensors_data_raw` 出现确认就绪；
+7. 进入脚本里的 TODO 任务逻辑区，由选手填写。
 
 退出（Ctrl+C）时通过 `atexit` 自动关闭 roslaunch 子进程。
 
@@ -49,6 +50,39 @@ challenge_cup_simulator/utils/      # 受保护包（选手不可改动）
 - seed 用于选择场景实例，不随机机器人初始位姿；
 - 本地测试可自行指定 seed；
 - 正式评测 seed 由组委会指定，选手不需要依赖具体随机规则。
+
+## 比赛计时器
+
+使用 `challenge_task.py` 启动场景时，系统会自动启动比赛计时器。
+计时基准来自仿真时间，不受实时率影响。
+
+默认行为：
+
+- 未设置时长：只显示用时，不自动结束任务；
+- 设置 `--time-limit`：比赛模式下到时自动结束当前任务节点；
+- 设置 `--debug-time`：调试模式，只显示计时，超过时长也继续运行；
+- 设置 `--no-timer-gui`：不弹出窗口，仅保留后台计时日志；
+- 正式评测 `CHALLENGE_EVAL_MODE=1` 下会忽略调试开关，到时结束任务。
+
+```bash
+# 到 120 秒自动结束任务
+rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3 --time-limit 120
+
+# 调试：显示计时，但超过时长也不结束任务
+rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3 --time-limit 120 --debug-time
+
+# 不弹出窗口，仅保留后台计时
+rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3 --time-limit 120 --no-timer-gui
+```
+
+正式评测可由组委会设置 `CHALLENGE_TIME_LIMIT` 和 `CHALLENGE_EVAL_MODE=1`。
+评测模式下会忽略调试开关，到时结束任务。
+
+也可以通过环境变量设置默认时长：
+
+```bash
+CHALLENGE_TIME_LIMIT=120 rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3
+```
 
 ## 稳定控制参数（重要）
 
@@ -81,6 +115,7 @@ _scene_<scene>_active.xml
 每次启动时，launcher 会调用 `challenge_secret`（编译为 `.so` 的 Cython 模块，
 对标 CRAIC 的 `craic_secret`）校验场景**源输入**和启动器是否被篡改：
 `config/scenes/scene*.yaml` + `utils/scene_builder.py` + `utils/challenge_sim_launcher.py` +
+`scripts/sim_timer.py` +
 `models/biped_s52/xml/biped_s52.xml`。
 
 - `.so` 缺失 → 默认 `[FATAL]` 退出（fail-closed）；开发机如需放行，设

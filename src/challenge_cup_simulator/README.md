@@ -1,52 +1,68 @@
 # Challenge Cup Simulator
 
-This package contains a standalone Challenge Cup MuJoCo scene for the Kuavo
-`biped_s52` robot.
+本包提供挑战杯仿真赛使用的 Kuavo `biped_s52` MuJoCo 场景、模型与启动工具。
 
-## Start
+## 启动仿真
+
+推荐通过选手任务模板启动，它会自动完成场景生成、完整性校验、随机场景初始化、反作弊监控和计时器启动：
+
+```bash
+rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3
+```
+
+也可以直接启动 simulator launch 文件：
 
 ```bash
 roslaunch challenge_cup_simulator load_kuavo_mujoco_challenge.launch
 ```
 
-`with_estimation` defaults to `false` so the scene can start in workspaces that
-do not include `humanoid_estimation`. Enable it explicitly if that package is
-available:
+`with_estimation` 默认是 `false`，这样即使工作空间里没有 `humanoid_estimation` 也能启动。
+如果当前环境已包含该包，可以显式打开：
 
 ```bash
 roslaunch challenge_cup_simulator load_kuavo_mujoco_challenge.launch with_estimation:=true
 ```
 
-The CRAIC rosbag nodelet include is also optional and defaults to off. Enable it
-with `use_rosbag_nodelet:=true` only when the `humanoid_interface` package is
-available.
+CRAIC rosbag nodelet include 也是可选的，默认关闭。只有当前环境包含
+`humanoid_interface` 时才建议打开：
 
-The scene loaded by default is:
+```bash
+roslaunch challenge_cup_simulator load_kuavo_mujoco_challenge.launch use_rosbag_nodelet:=true
+```
+
+默认加载场景：
 
 ```text
 models/biped_s52/xml/scene1.xml
 ```
 
-The XML is generated from a YAML scene description, matching the CRAIC
-simulator workflow:
+切换场景：
+
+```bash
+roslaunch challenge_cup_simulator load_kuavo_mujoco_challenge.launch scene_name:=scene2
+```
+
+## 场景生成
+
+场景 XML 由 YAML 场景描述生成，流程与 CRAIC simulator 类似：
 
 ```bash
 rosrun challenge_cup_simulator scene_builder.py
 ```
 
-Generate all configured competition scenes:
+生成全部比赛场景：
 
 ```bash
 rosrun challenge_cup_simulator scene_builder.py --all
 ```
 
-or directly from the source tree:
+也可以从源码目录直接运行：
 
 ```bash
 python3 src/challenge_cup_simulator/utils/scene_builder.py
 ```
 
-The YAML source is:
+YAML 源文件：
 
 ```text
 config/scenes/scene1.yaml
@@ -54,33 +70,43 @@ config/scenes/scene2.yaml
 config/scenes/scene3.yaml
 ```
 
-Switch scenes at launch time:
+## 比赛计时器
+
+推荐通过选手任务模板启动计时器：
 
 ```bash
-roslaunch challenge_cup_simulator load_kuavo_mujoco_challenge.launch scene_name:=scene2
+rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3 --time-limit 120
 ```
+
+仿真已经启动后，也可以单独运行计时器做本地调试：
+
+```bash
+rosrun challenge_cup_simulator sim_timer.py --time-limit 120
+rosrun challenge_cup_simulator sim_timer.py --time-limit 120 --no-gui
+```
+
+计时器使用 `/sensors_data_raw` 中的仿真时间作为计时基准，因此仿真暂停、卡顿或实时率变化
+不会改变比赛用时口径。单独的 `sim_timer.py` 只是调试包装；正式启动链路由受保护启动器自动拉起计时器。
 
 ## LiDAR
 
-The simulated mid360 LiDAR uses the PyPI `mujoco-lidar` package for scan
-patterns. Install the dependency in the Docker workspace before launching:
+模拟 mid360 LiDAR 使用 PyPI 的 `mujoco-lidar` 包生成扫描模式。
+启动前在 Docker 工作空间中安装依赖：
 
 ```bash
 pip3 install --no-deps -r src/challenge_cup_simulator/requirements.txt
 ```
 
-`--no-deps` avoids optional visualization dependencies that are not needed by
-the Challenge Cup LiDAR node. The default launch starts the CPU backend and
-publishes `/lidar/points`, `/lidar_imu`, and `/mujoco/qpos`:
+`--no-deps` 会跳过本任务不需要的可视化可选依赖。默认 launch 使用 CPU 后端，并发布
+`/lidar/points`、`/lidar_imu` 和 `/mujoco/qpos`：
 
 ```bash
 roslaunch challenge_cup_simulator load_kuavo_mujoco_challenge.launch enable_lidar:=true lidar_backend:=cpu
 ```
 
-## Scene Layout
+## 场景概览
 
-- One CRAIC-style table, built from the same simple tabletop and leg geometry.
-- Four movable parcels on the table.
-- One `0.2 m x 0.2 m` weighing area on the tabletop.
-- One `0.4 m x 0.3 m x 0.3 m` open sorting box on the tabletop.
-- The robot starts in front of the table, facing the parcels.
+- `scene1`：快递包裹称重与摆放。
+- `scene2`：三类零件分拣归档。
+- `scene3`：SMT 料盘出库。
+- 机器人默认从桌前起步，面向操作区域。
