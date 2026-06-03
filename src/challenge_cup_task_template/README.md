@@ -1,138 +1,162 @@
-# challenge_cup_task_template
+# 挑战杯仿真赛选手代码提交说明
 
-挑战杯仿真赛**选手任务模板**功能包。职责划分如下：
+`challenge_cup_task_template` 是选手任务代码包。参赛队伍应基于本包开发算法逻辑，并在官方 Docker 仿真环境中完成自测。
 
-- `challenge_cup_simulator`：只管仿真环境 / 场景 / 模型；
-- `challenge_cup_task_template`（本包）：只管选手的一键入口脚本。
-
-## 快速开始
+正式评测时，组委会会将提交的功能包放入工作空间 `src/` 目录，编译后运行统一入口：
 
 ```bash
-# 编译后 source 工作空间
+rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed <评测种子>
+rosrun challenge_cup_task_template challenge_task.py --scene scene2 --seed <评测种子>
+rosrun challenge_cup_task_template challenge_task.py --scene scene3 --seed <评测种子>
+```
+
+## 开发入口
+
+选手主要修改：
+
+```text
+challenge_cup_task_template/
+├── CMakeLists.txt
+├── package.xml
+├── README.md
+└── scripts/
+    └── challenge_task.py
+```
+
+要求：
+
+- 功能包名称保持 `challenge_cup_task_template` 不变；
+- 入口脚本保持 `scripts/challenge_task.py` 不变；
+- 三个场景统一由 `--scene` 参数选择；
+- 可以在本包内新增 `src/`、`launch/`、`config/` 等辅助文件；
+- 如新增第三方依赖，必须在提交包的 README 中写明安装方式和用途。
+
+`challenge_task.py` 中已经提供场景分支位置，可按需实现：
+
+```python
+if scene == "scene1":
+    pass  # 场景一：包裹称重与摆放
+elif scene == "scene2":
+    pass  # 场景二：分拣归档
+elif scene == "scene3":
+    pass  # 场景三：SMT 料盘出库
+```
+
+## 本地运行
+
+编译并 source 工作空间后运行：
+
+```bash
 rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3
 rosrun challenge_cup_task_template challenge_task.py --scene scene2 --seed 3
 rosrun challenge_cup_task_template challenge_task.py --scene scene3 --seed 3
 ```
 
-该脚本会自动：
+`--seed` 用于本地生成不同场景实例。正式评测 seed 由组委会指定，选手不应依赖某个固定 seed 或硬编码物体位置。
 
-1. 调用受保护的 `challenge_sim_launcher.py` 生成静态场景 XML；
-2. `roslaunch challenge_cup_simulator load_kuavo_mujoco_challenge.launch`（自带 roscore）启动仿真；
-3. 通过受保护模块完成场景初始化；
-4. 锁定物体摆放服务并启动作弊监控；
-5. 启动比赛计时器；
-6. 初始化 ROS 节点并等待 `/sensors_data_raw` 出现确认就绪；
-7. 进入脚本里的 TODO 任务逻辑区，由选手填写。
+## 比赛计时
 
-退出（Ctrl+C）时通过 `atexit` 自动关闭 roslaunch 子进程。
+默认不限制时长，只显示计时，便于调试。
 
-## 文件结构
-
-```
-challenge_cup_task_template/        # 选手包（可编辑：写任务逻辑）
-├── package.xml
-├── CMakeLists.txt
-├── README.md
-└── scripts/
-    └── challenge_task.py           # 三场景统一入口
-
-challenge_cup_simulator/utils/      # 受保护包（选手不可改动）
-└── challenge_sim_launcher.py       # 公共启动器：校验 + 生成场景 + roslaunch
-```
-
-> **公共启动器 `challenge_sim_launcher.py` 故意放在受保护的 `challenge_cup_simulator` 包内**，
-> 而非本包，这样完整性校验无法被选手删改绕过。场景脚本通过 rospkg 定位并导入它。
-
-## 关于 `--seed`（重要）
-
-挑战杯 seed 说明：
-
-- seed 用于选择场景实例，不随机机器人初始位姿；
-- 本地测试可自行指定 seed；
-- 正式评测 seed 由组委会指定，选手不需要依赖具体随机规则。
-
-## 比赛计时器
-
-使用 `challenge_task.py` 启动场景时，系统会自动启动比赛计时器。
-计时基准来自仿真时间，不受实时率影响。
-
-默认行为：
-
-- 未设置时长：只显示用时，不自动结束任务；
-- 设置 `--time-limit`：到时自动结束当前任务节点；
-- 设置 `--no-timer-gui`：不弹出窗口，仅保留后台计时日志；
-- 计时器窗口里的 `Stop Timer` 是单次冻结，只停止计时显示，用于比赛结束后由裁判查看用时；
-- `--time-limit` 的单位是秒，例如 `--time-limit 120` 表示 120 秒。
+设置 `--time-limit` 后，到达时限会自动结束当前任务节点。单位是秒：
 
 ```bash
-# 到 120 秒自动结束任务
 rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3 --time-limit 120
+```
 
-# 不设置时长：只显示用时，不自动结束任务
-rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3
+如不需要弹出计时窗口，可加：
 
-# 不弹出窗口，仅保留后台计时
+```bash
 rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3 --time-limit 120 --no-timer-gui
 ```
 
-正式评测可由组委会设置 `CHALLENGE_TIME_LIMIT` 和 `CHALLENGE_EVAL_MODE=1`。
-设置时长后，到时会自动结束任务。
+计时窗口中的 `Stop Timer` 用于任务完成后停止计时显示，便于裁判查看用时。
 
-也可以通过环境变量设置默认时长：
+## 常用接口
+
+以下接口可作为开发起点。完整实物接口文档可参考官方说明，但仿真比赛最终以当前仿真环境中的话题、服务和消息定义为准：
+
+https://kuavo.lejurobot.com/manual/basic_usage/kuavo-ros-control/docs/4%E5%BC%80%E5%8F%91%E6%8E%A5%E5%8F%A3/%E6%8E%A5%E5%8F%A3%E4%BD%BF%E7%94%A8%E6%96%87%E6%A1%A3/
+
+| 接口 | 类型 | 用途 |
+| --- | --- | --- |
+| `/cmd_vel` | `geometry_msgs/Twist` | 底盘/步态速度控制 |
+| `/kuavo_arm_traj` | `sensor_msgs/JointState` | 双臂关节轨迹命令 |
+| `/sensors_data_raw` | `kuavo_msgs/sensorsData` | 机器人传感器数据 |
+| `/lidar/points` | `sensor_msgs/PointCloud2` | 激光雷达点云 |
+| `/control_robot_leju_claw` | `kuavo_msgs/controlLejuClaw` 服务 | 仿真夹爪控制 |
+| `/leju_claw_command` | `kuavo_msgs/lejuClawCommand` | 夹爪命令话题 |
+| `/leju_claw_state` | `kuavo_msgs/lejuClawState` | 夹爪状态话题 |
+
+建议在容器内用下面命令核对接口：
 
 ```bash
-CHALLENGE_TIME_LIMIT=120 rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3
+rostopic list
+rosservice list
+rosmsg show kuavo_msgs/sensorsData
+rossrv show kuavo_msgs/controlLejuClaw
 ```
 
-## 稳定控制参数（重要）
+## 提交内容
 
-公共启动器在 `roslaunch` 时**显式带上**已验证过的稳定控制参数：
+提交附件外层目录建议使用：
 
-```
-with_estimation:=true
-wbc_frequency:=1000
-sensor_frequency:=1000
+```text
+参赛团队名称+挑战杯仿真赛/
 ```
 
-这是为了避免一键启动复现此前 challenge launch 默认值被降级（关闭状态估计 / 频率减半）
-导致的转向异常 / 摔倒问题。即使将来 launch 默认值再次被改动，本包也能保证启动行为稳定。
+具体命名以赛事通知为准。目录内至少包含固定功能包 `challenge_cup_task_template`：
 
-## 生成文件
-
-每次启动会在 `challenge_cup_simulator/models/biped_s52/xml/` 下生成：
-
+```text
+参赛团队名称+挑战杯仿真赛/
+└── challenge_cup_task_template/
+    ├── CMakeLists.txt
+    ├── package.xml
+    ├── README.md
+    └── scripts/
+        └── challenge_task.py
 ```
-_scene_<scene>_active.xml
+
+如果只使用官方仿真环境自带控制器，只提交 `challenge_cup_task_template` 即可。
+
+如果修改了控制器或其他功能包，需要同时提交被修改的功能包，并保持原功能包名称不变：
+
+```text
+参赛团队名称+挑战杯仿真赛/
+├── challenge_cup_task_template/
+│   └── ...
+└── <被修改的功能包>/
+    └── ...
 ```
 
-> 必须放在该 xml 目录、与原始 `sceneN.xml` 同级，因为 XML 里的 `include` / `mesh` / `texture`
-> 都是相对该 XML 文件位置的相对路径，放到 `/tmp` 等其它目录会导致资源加载失败。
+同时需要在 README 中说明：
 
-这些生成文件已在仓库根 `.gitignore` 中忽略（`_scene_*.xml`），不会污染 git。
+- 修改了哪些功能包；
+- 修改目的和主要内容；
+- 编译方式；
+- 运行方式；
+- 是否需要额外依赖。
 
-## 完整性校验（防篡改）
+## 严禁事项
 
-每次启动时，launcher 会调用 `challenge_secret`（编译为 `.so` 的 Cython 模块）
-校验场景**源输入**和启动器是否被篡改：
-`config/scenes/scene*.yaml` + `utils/scene_builder.py` + `utils/challenge_sim_launcher.py` +
-`scripts/sim_timer.py` +
-`models/biped_s52/xml/biped_s52.xml`。
+机器人必须通过自身传感器和控制接口完成任务。以下行为属于违规，可能导致对应场景成绩无效：
 
-- `.so` 缺失 → 默认 `[FATAL]` 退出（fail-closed）；开发机如需放行，设
-  `CHALLENGE_SECRET_ALLOW_MISSING=1` 降级为警告并继续；
-- 校验不通过（文件被改）→ `[FATAL]` 退出，不启动仿真。
+1. 直接读取仿真真值或物体绝对坐标；
+2. 调用物体摆放、场景重置等非选手接口；
+3. 修改仿真场景、模型、评分或启动相关文件；
+4. 通过非物理方式移动机器人或物体；
+5. 干预仿真运行状态，例如暂停、加速、跳步；
+6. 依赖人工运行中干预完成任务。
 
-编译产物 `challenge_cup_simulator/lib/challenge_secret*.so` 随仿真包分发；
-机密源码由组委会单独保存，**不**进选手分发仓库。
+请不要订阅或调用比赛禁用的上帝视角接口，例如 `/mujoco/qpos`、`/ground_truth/state` 以及物体摆放相关服务。
 
-> 校验调用 `_verify_integrity()` 位于受保护的 `challenge_cup_simulator/utils/challenge_sim_launcher.py`，
-> 选手无法改动该包，因此无法删改校验逻辑绕过。选手只能编辑本包（task_template）里的任务脚本。
+## 提交前检查
 
-## 不使用的旧接口
+提交前建议逐项确认：
 
-挑战杯有**自己的** `challenge_secret`（见上），不使用以下旧接口：
-
-- `get_random_init_state`（随机机器人初始位姿）—— 挑战杯 seed 只做物体随机化；
-- `GripperController`（旧夹爪封装类）—— 挑战杯请用 `/control_robot_leju_claw` 服务及
-  `/leju_claw_command`、`/leju_claw_state` 话题，参考
-  `challenge_cup_simulator/scripts/sim_leju_claw_interface.py`、`leju_claw_keyboard.py`。
+- `challenge_cup_task_template` 包名未修改；
+- `scripts/challenge_task.py` 入口文件存在且可执行；
+- 三个场景均能通过 `--scene scene1/scene2/scene3` 启动；
+- 代码能在官方 Docker 环境中编译和运行；
+- 没有提交 `build/`、`devel/`、`log/`、rosbag、缓存文件或大体积临时数据；
+- 如修改其他功能包，已在 README 中说明修改内容和运行方式。
