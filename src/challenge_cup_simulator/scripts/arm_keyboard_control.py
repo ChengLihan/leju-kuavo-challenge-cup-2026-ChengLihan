@@ -440,6 +440,10 @@ class KeyBoardArmController:
             'j': {'axis':'yaw', 'index':0, 'gap': yaw_gap},
             'l': {'axis':'yaw', 'index':0, 'gap': -yaw_gap}
         }
+        self._control_body_height_keys = {              # 控制躯干高度的按键映射
+            'r': {'action': '下蹲', 'linear_z': -0.18},
+            't': {'action': '恢复站立', 'linear_z': 0.0},
+        }
         self.eef_target_xyz = np.array(np.zeros(3), dtype=object)    # 目标末端位置xyz
         self.eef_target_ypr = np.array(np.zeros(3), dtype=object)    # 目标末端姿态ypr
         self.l_eef_target_xyz = np.array(np.zeros(3), dtype=object)
@@ -589,6 +593,8 @@ class KeyBoardArmController:
         else:
             key = ''
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
+        if key and key != '\x03':
+            key = key.lower()
 
         # 更新末端位置
         if  key in self._control_xyz_keys:
@@ -700,13 +706,10 @@ class KeyBoardArmController:
             rospy.sleep(1)
             return ""
         # 此处控制机器人的下蹲与恢复站立
-        elif key == 'r':
-            # 执行下蹲动作
-            self.publish_cmd_pose(linear_z=-0.18)  # 增量高度 (m)
-            return ""
-        elif key == 't':
-            # 执行恢复站立动作
-            self.publish_cmd_pose(linear_z=0.0)  # 增量高度 (m)
+        elif key in self._control_body_height_keys:
+            ctrl = self._control_body_height_keys[key]
+            self.publish_cmd_pose(linear_z=ctrl['linear_z'])
+            print(f"按下{key}键, {ctrl['action']}, /cmd_pose linear.z={ctrl['linear_z']:.3f}m")
             return ""
 
         elif key != '\x03':
@@ -786,7 +789,7 @@ class KeyBoardArmController:
             print("JL: rotation - Z - YAW")
             print("Press N to Switch to another hand")
             print("Press Z/X to Open/Close the claw of now arm")
-            print("Press R/T to squat/stand")
+            print("Press R/T to Squat/Stand")
             print("Press Ctrl-C to exit")
 
             set_arm_control_mode(2)
