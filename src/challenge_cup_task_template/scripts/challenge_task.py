@@ -620,46 +620,61 @@ class Manipulation:
 
 
 class Scene1Controller:
-    """场景一：包裹称重与摆放。"""
+    """场景一：包裹称重与摆放（含数据集采集模式）。"""
 
-    def __init__(self, robot, perception, navigation, manipulation):
+    def __init__(self, robot, perception, navigation, manipulation, seed=0):
         self._robot = robot
         self._perception = perception
         self._nav = navigation
         self._manip = manipulation
+        self._seed = seed
+        self._exit_after_run = False
 
     def run(self):
         import rospy
-        rospy.loginfo("=== 场景一：包裹称重与摆放 ===")
+        import cv2
+        rospy.loginfo("=== 场景一：包裹称重与摆放（seed=%d） ===", self._seed)
 
         self._robot.look_at(pitch=+20.0, yaw=0.0)
 
         rospy.loginfo("等待头部到位 (+20°) ...")
-        if not self._perception.wait_for_head_pitch(+20.0):
-            rospy.logwarn("头部未到位，继续尝试...")
+        self._perception.wait_for_head_pitch(+20.0)
 
         rospy.loginfo("等待相机数据就绪...")
         if not self._perception.wait_for_data():
             rospy.logerr("相机数据未就绪，退出")
             return
 
-        for i in range(4):
-            rospy.loginfo("===== 处理第 %d 个包裹 =====", i + 1)
+        # 确保 images 目录存在
+        images_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "images")
+        os.makedirs(images_dir, exist_ok=True)
 
-            block = self._perception.get_nearest_block()
-            if block is None:
-                rospy.logwarn("未检测到方块，跳过")
+        crop_size = 640
+
+        # 每个 seed 截取 3 张，间隔 0.8s 以获取不同帧
+        for i in range(3):
+            head_img = self._perception._get_cv_image("head")
+            if head_img is None:
+                rospy.logerr("[seed=%d 第%d张] 未能获取头部相机图像", self._seed, i + 1)
                 continue
 
-            bx, by, bz = block
-            rospy.loginfo("最近方块位置 (base_link): x=%.2f, y=%.2f, z=%.2f", bx, by, bz)
+            h, w = head_img.shape[:2]
+            x_start = (w - crop_size) // 2
+            y_start = h - crop_size
+            cropped = head_img[y_start:y_start + crop_size, x_start:x_start + crop_size]
 
-            # self._approach_block(bx, by)
-            # self._fine_align_and_grasp()
-            # self._manip.home("right")
-            rospy.sleep(0.5)
+            save_path = os.path.join(images_dir,
+                                     "scene1_seed{}_c{}.jpg".format(self._seed, i + 1))
+            cv2.imwrite(save_path, cropped)
+            rospy.loginfo("已保存: %s (%dx%d)", save_path, crop_size, crop_size)
 
-        rospy.loginfo("场景一完成")
+            if i < 2:
+                rospy.sleep(0.8)
+
+        self._exit_after_run = True
+        rospy.loginfo("场景一（seed=%d）数据集采集完成，共 3 张", self._seed)
 
     def _approach_block(self, bx, by):
         """导航到方块前方约 0.4m 处。"""
@@ -705,27 +720,62 @@ class Scene1Controller:
 
 
 class Scene2Controller:
-    """场景二：零件分拣归档。"""
+    """场景二：零件分拣归档（含数据集采集模式）。"""
 
-    def __init__(self, robot, perception, navigation, manipulation):
+    def __init__(self, robot, perception, navigation, manipulation, seed=0):
         self._robot = robot
         self._perception = perception
         self._nav = navigation
         self._manip = manipulation
+        self._seed = seed
+        self._exit_after_run = False
 
     def run(self):
         import rospy
-        rospy.loginfo("=== 场景二：零件分拣归档 ===")
-        for i in range(6):
-            rospy.loginfo("处理第 %d 个零件", i + 1)
-            # 1. 检测零件类别 (A/B/C)
-            # 2. 导航到零件位置
-            # 3. 夹爪抓取
-            # 4. 导航到对应收纳区
-            # 5. 放置
-            self._detect_and_pick()
-            self._sort_and_place()
-        rospy.loginfo("场景二完成")
+        import cv2
+        rospy.loginfo("=== 场景二：零件分拣归档（seed=%d） ===", self._seed)
+        self._robot.look_at(pitch=+20.0, yaw=0.0)
+
+        rospy.loginfo("等待头部到位 (+20°) ...")
+        self._perception.wait_for_head_pitch(+20.0)
+
+        rospy.loginfo("等待相机数据就绪...")
+        if not self._perception.wait_for_data():
+            rospy.logerr("相机数据未就绪，退出")
+            return
+
+        # 确保 images 目录存在
+        images_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "images")
+        os.makedirs(images_dir, exist_ok=True)
+
+        crop_size = 640
+
+        # 每个 seed 截取 3 张，间隔 0.8s 以获取不同帧
+        for i in range(3):
+            # 获取头部相机图像
+            head_img = self._perception._get_cv_image("head")
+            if head_img is None:
+                rospy.logerr("[seed=%d 第%d张] 未能获取头部相机图像", self._seed, i + 1)
+                continue
+
+            h, w = head_img.shape[:2]
+            # 截取中下方 640x640 区域
+            x_start = (w - crop_size) // 2
+            y_start = h - crop_size
+            cropped = head_img[y_start:y_start + crop_size, x_start:x_start + crop_size]
+
+            save_path = os.path.join(images_dir,
+                                     "scene2_seed{}_c{}.jpg".format(self._seed, i + 1))
+            cv2.imwrite(save_path, cropped)
+            rospy.loginfo("已保存: %s (%dx%d)", save_path, crop_size, crop_size)
+
+            if i < 2:
+                rospy.sleep(0.8)
+
+        self._exit_after_run = True
+        rospy.loginfo("场景二（seed=%d）数据集采集完成，共 3 张", self._seed)
 
     def _detect_and_pick(self):
         # TODO: 识别零件类别
@@ -798,9 +848,9 @@ def run_scene(scene, seed, node_name=None, timeout=120,
     rospy.loginfo("场景实例已初始化。")
 
     if scene == "scene1":
-        ctrl = Scene1Controller(robot, perception, navigation, manipulation)
+        ctrl = Scene1Controller(robot, perception, navigation, manipulation, seed=seed)
     elif scene == "scene2":
-        ctrl = Scene2Controller(robot, perception, navigation, manipulation)
+        ctrl = Scene2Controller(robot, perception, navigation, manipulation, seed=seed)
     elif scene == "scene3":
         ctrl = Scene3Controller(robot, perception, navigation, manipulation)
     else:
@@ -810,6 +860,11 @@ def run_scene(scene, seed, node_name=None, timeout=120,
 
 
     ctrl.run()
+
+    if hasattr(ctrl, '_exit_after_run') and ctrl._exit_after_run:
+        rospy.loginfo("数据集采集模式，自动退出。")
+        rospy.signal_shutdown("dataset_collection_done")
+        return
 
     rospy.loginfo("任务结束，持续发布可视化结果，Ctrl-C 退出...")
     rate = rospy.Rate(2)

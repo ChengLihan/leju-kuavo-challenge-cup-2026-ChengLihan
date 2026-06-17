@@ -1,0 +1,79 @@
+{
+  "version": "0.4.36",
+  "flags": {},
+  "shapes": [
+    {
+      "label": "pipe_clamp",
+      "text": "",
+      "points": [
+        [
+          312.2694610778443,
+          218.9640718562874
+        ],
+        [
+          484.12574850299404,
+          300.4011976047904
+        ]
+      ],
+      "group_id": null,
+      "shape_type": "rectangle",
+      "flags": {}
+    },
+    {
+      "label": "pipe_fitting",
+      "text": "",
+      "points": [
+        [
+          806.8802395209582,
+          238.72455089820357
+        ],
+        [
+          930.8323353293414,
+          305.79041916167665
+        ]
+      ],
+      "group_id": null,
+      "shape_type": "rectangle",
+      "flags": {}
+    },
+    {
+      "label": "pipe_fitting",
+      "text": "",
+      "points": [
+        [
+          699.6946107784432,
+          273.45508982035926
+        ],
+        [
+          786.5209580838324,
+          421.9580838323353
+        ]
+      ],
+      "group_id": null,
+      "shape_type": "rectangle",
+      "flags": {}
+    },
+    {
+      "label": "screwdriver",
+      "text": "",
+      "points": [
+        [
+          888.3173652694611,
+          398.60479041916165
+        ],
+        [
+          981.7305389221558,
+          515.9700598802394
+        ]
+      ],
+      "group_id": null,
+      "shape_type": "rectangle",
+      "flags": {}
+    }
+  ],
+  "imagePath": "ecmaster-zero.png",
+  "imageData": null,
+  "imageHeight": 802,
+  "imageWidth": 1294,
+  "text": ""
+}

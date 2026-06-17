@@ -1,0 +1,15 @@
+names:
+- hammer
+- pliers
+- screwdriver
+- wrench
+nc: 4
+roboflow:
+  license: CC BY 4.0
+  project: workinghands
+  url: https://universe.roboflow.com/mechanical-tools/workinghands/dataset/4
+  version: 4
+  workspace: mechanical-tools
+test: ../test/images
+train: ../train/images
+val: ../valid/images

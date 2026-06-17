@@ -1,0 +1,27 @@
+{
+  "version": "0.4.36",
+  "flags": {},
+  "shapes": [
+    {
+      "label": "asd",
+      "text": "",
+      "points": [
+        [
+          962.3175182481752,
+          383.78467153284674
+        ],
+        [
+          1065.9671532846717,
+          463.3467153284672
+        ]
+      ],
+      "group_id": null,
+      "shape_type": "rectangle",
+      "flags": {}
+    }
+  ],
+  "imagePath": "遥控器.png",
+  "imageData": null,
+  "imageHeight": 1061,
+  "imageWidth": 1475
+}
