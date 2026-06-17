@@ -1,0 +1,21 @@
+<mujoco model="screwdriver">
+  <asset>
+    <material name="screwdriver_handle_mat" rgba="0.72 0.12 0.10 1" specular="0.25" shininess="0.18"/>
+    <material name="screwdriver_metal_mat" rgba="0.78 0.78 0.74 1" specular="0.50" shininess="0.35"/>
+    <material name="screwdriver_tip_mat" rgba="0.04 0.04 0.04 1" specular="0.14" shininess="0.12"/>
+    <material name="screwdriver_collision_mat" rgba="0.10 0.10 0.10 0.12"/>
+    <mesh name="screwdriver_handle" file="screwdriver_handle.obj" scale="0.018 0.018 0.018"/>
+    <mesh name="screwdriver_neck" file="screwdriver_neck.obj" scale="0.018 0.018 0.018"/>
+    <mesh name="screwdriver_tip" file="screwdriver_tip.obj" scale="0.018 0.018 0.018"/>
+  </asset>
+  <worldbody>
+    <body name="model" euler="1.5708 0 0">
+      <geom name="handle_visual" type="mesh" mesh="screwdriver_handle" material="screwdriver_handle_mat" contype="0" conaffinity="0" group="2"/>
+      <geom name="neck_visual" type="mesh" mesh="screwdriver_neck" material="screwdriver_metal_mat" contype="0" conaffinity="0" group="2"/>
+      <geom name="tip_visual" type="mesh" mesh="screwdriver_tip" material="screwdriver_tip_mat" contype="0" conaffinity="0" group="2"/>
+      <geom name="handle_collision" type="capsule" fromto="0.013 0.013 -0.014 0.081 0.016 -0.082" size="0.0125" mass="0.065" material="screwdriver_collision_mat" group="3" friction="4.5 1.2 0.03" condim="6" solref="0.008 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="neck_collision" type="capsule" fromto="0.014 0.010 -0.014 -0.078 0.007 0.078" size="0.007" mass="0.030" material="screwdriver_collision_mat" group="3" friction="4.5 1.2 0.03" condim="6" solref="0.008 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="tip_collision" type="box" pos="-0.079 0.006 0.079" size="0.002 0.006 0.002" mass="0.005" contype="0" conaffinity="0" material="screwdriver_collision_mat" group="3"/>
+    </body>
+  </worldbody>
+</mujoco>

@@ -1,0 +1,298 @@
+extends: "scene1.yaml"
+scene_name: "Challenge Cup Scene 2"
+
+# Scene 2: 3-type, 6-part sorting task.
+# Type A/B use pipe-fitting part meshes. Type C uses the screwdriver model.
+materials:
+  sorting_area_a_mat:
+    rgba: "0.04 0.38 0.86 0.86"
+    emission: "0.12"
+  sorting_area_b_mat:
+    rgba: "0.88 0.42 0.08 0.86"
+    emission: "0.10"
+  sorting_area_c_mat:
+    rgba: "0.58 0.28 0.78 0.86"
+    emission: "0.10"
+  sorting_bin_a_wall_mat:
+    rgba: "0.03 0.24 0.58 0.92"
+    specular: "0.08"
+    shininess: "0.04"
+  sorting_bin_b_wall_mat:
+    rgba: "0.58 0.26 0.04 0.92"
+    specular: "0.08"
+    shininess: "0.04"
+  sorting_bin_c_wall_mat:
+    rgba: "0.36 0.16 0.52 0.92"
+    specular: "0.08"
+    shininess: "0.04"
+  part_type_a_mat:
+    rgba: "0.76 0.78 0.74 1"
+    specular: "0.45"
+    shininess: "0.35"
+  part_type_b_mat:
+    rgba: "0.22 0.22 0.22 1"
+    specular: "0.25"
+    shininess: "0.18"
+  screwdriver_handle_mat:
+    rgba: "0.72 0.12 0.10 1"
+    specular: "0.25"
+    shininess: "0.18"
+  screwdriver_metal_mat:
+    rgba: "0.78 0.78 0.74 1"
+    specular: "0.50"
+    shininess: "0.35"
+  screwdriver_tip_mat:
+    rgba: "0.04 0.04 0.04 1"
+    specular: "0.14"
+    shininess: "0.12"
+  part_collision_mat:
+    rgba: "0.10 0.10 0.10 0.12"
+
+objects:
+  - type: "box"
+    name: "factory_back_wall"
+    pos: "3.35 0 0.75"
+    size: "0.04 2.80 0.75"
+    material: "factory_wall_mat"
+    mass: 20
+
+  - type: "box"
+    name: "factory_front_wall"
+    pos: "-2.70 0 0.75"
+    size: "0.04 2.80 0.75"
+    material: "factory_wall_mat"
+    mass: 20
+
+  - type: "box"
+    name: "factory_left_wall"
+    pos: "0.325 2.80 0.75"
+    size: "3.025 0.04 0.75"
+    material: "factory_wall_mat"
+    mass: 20
+
+  - type: "box"
+    name: "factory_right_wall"
+    pos: "0.325 -2.80 0.75"
+    size: "3.025 0.04 0.75"
+    material: "factory_wall_mat"
+    mass: 20
+
+  - type: "box"
+    name: "factory_back_lower_panel"
+    pos: "3.305 0 0.28"
+    size: "0.012 2.65 0.10"
+    material: "factory_wall_panel_mat"
+    mass: 1
+
+  - type: "table"
+    name: "challenge_table"
+    pos: "0.05 0 0"
+    top_size: "0.40 0.70 0.015"
+    top_pos: "0 0 0.815"
+    top_material: "table_top_mat"
+    leg_radius: 0.03
+    leg_height: 0.40
+    leg_z: 0.40
+    leg_offsets:
+      - "0.35 0.65"
+      - "0.35 -0.65"
+      - "-0.35 0.65"
+      - "-0.35 -0.65"
+    leg_material: "table_leg_mat"
+
+  - type: "tapered_open_box"
+    name: "sorting_bin_a"
+    pos: "-0.04 -0.43 0.830"
+    movable: true
+    mass: 0.80
+    friction: "1.8 0.6 0.02"
+    condim: "6"
+    solref: "0.012 1.2"
+    solimp: "0.95 0.99 0.001"
+    inner_size: "0.20 0.22 0.14"
+    wall_thickness: 0.012
+    floor_thickness: 0.010
+    profile: "front_low_back_high"
+    front_height: 0.060
+    back_height: 0.145
+    rear_high_length_ratio: 0.45
+    floor_material: "sorting_area_a_mat"
+    wall_material: "sorting_bin_a_wall_mat"
+
+  - type: "tapered_open_box"
+    name: "sorting_bin_b"
+    pos: "-0.04 0.00 0.830"
+    movable: true
+    mass: 0.80
+    friction: "1.8 0.6 0.02"
+    condim: "6"
+    solref: "0.012 1.2"
+    solimp: "0.95 0.99 0.001"
+    inner_size: "0.20 0.22 0.14"
+    wall_thickness: 0.012
+    floor_thickness: 0.010
+    profile: "front_low_back_high"
+    front_height: 0.060
+    back_height: 0.145
+    rear_high_length_ratio: 0.45
+    floor_material: "sorting_area_b_mat"
+    wall_material: "sorting_bin_b_wall_mat"
+
+  - type: "tapered_open_box"
+    name: "sorting_bin_c"
+    pos: "-0.04 0.43 0.830"
+    movable: true
+    mass: 0.80
+    friction: "1.8 0.6 0.02"
+    condim: "6"
+    solref: "0.012 1.2"
+    solimp: "0.95 0.99 0.001"
+    inner_size: "0.20 0.22 0.14"
+    wall_thickness: 0.012
+    floor_thickness: 0.010
+    profile: "front_low_back_high"
+    front_height: 0.060
+    back_height: 0.145
+    rear_high_length_ratio: 0.45
+    floor_material: "sorting_area_c_mat"
+    wall_material: "sorting_bin_c_wall_mat"
+
+  - type: "mesh_part"
+    name: "part_type_a_1"
+    mesh_file: "../../steel_pipe_fasteners/steel_pipe_fasteners_no_supports.stl"
+    mesh_scale: "0.0006667 0.0006667 0.0006667"
+    pos: "-0.28 -0.35 0.803"
+    euler: "0 0 0.05"
+    material: "part_type_a_mat"
+    collision_type: "box"
+    collision_pos: "-0.0055 -0.0134 0.0373"
+    collision_size: "0.0222 0.0451 0.0101"
+    collision_material: "part_collision_mat"
+    mass: 0.08
+    friction: "4.5 1.2 0.03"
+
+  - type: "mesh_part"
+    name: "part_type_a_2"
+    mesh_file: "../../steel_pipe_fasteners/steel_pipe_fasteners_no_supports.stl"
+    mesh_scale: "0.0006667 0.0006667 0.0006667"
+    pos: "-0.28 -0.25 0.803"
+    euler: "0 0 0.82"
+    material: "part_type_a_mat"
+    collision_type: "box"
+    collision_pos: "-0.0055 -0.0134 0.0373"
+    collision_size: "0.0222 0.0451 0.0101"
+    collision_material: "part_collision_mat"
+    mass: 0.08
+    friction: "4.5 1.2 0.03"
+
+  - type: "mesh_part"
+    name: "part_type_b_1"
+    mesh_file: "../../t_junction/T_junction.STL"
+    mesh_scale: "0.003 0.003 0.003"
+    pos: "-0.28 -0.07 0.830"
+    euler: "0 0 -0.35"
+    material: "part_type_b_mat"
+    collision_type: "box"
+    collision_pos: "-0.010 0 0.02035"
+    collision_size: "0.02365 0.027 0.02031"
+    collision_material: "part_collision_mat"
+    mass: 0.12
+    friction: "4.5 1.2 0.03"
+
+  - type: "mesh_part"
+    name: "part_type_b_2"
+    mesh_file: "../../t_junction/T_junction.STL"
+    mesh_scale: "0.003 0.003 0.003"
+    pos: "-0.28 0.03 0.830"
+    euler: "0 0 0.72"
+    material: "part_type_b_mat"
+    collision_type: "box"
+    collision_pos: "-0.010 0 0.02035"
+    collision_size: "0.02365 0.027 0.02031"
+    collision_material: "part_collision_mat"
+    mass: 0.12
+    friction: "4.5 1.2 0.03"
+
+  - type: "mesh_part"
+    name: "part_type_c_1"
+    mesh_scale: "0.018 0.018 0.018"
+    visual_meshes:
+      - suffix: "handle"
+        mesh_file: "../../screwdriver/screwdriver_handle.obj"
+        material: "screwdriver_handle_mat"
+      - suffix: "neck"
+        mesh_file: "../../screwdriver/screwdriver_neck.obj"
+        material: "screwdriver_metal_mat"
+      - suffix: "tip"
+        mesh_file: "../../screwdriver/screwdriver_tip.obj"
+        material: "screwdriver_tip_mat"
+    pos: "-0.25 0.19 0.830"
+    quat: "0.44208890 0.44208890 0.55186720 0.55186720"
+    collision_material: "part_collision_mat"
+    friction: "4.5 1.2 0.03"
+    condim: "6"
+    solref: "0.008 1.2"
+    solimp: "0.95 0.99 0.001"
+    collision_geoms:
+      - suffix: "handle_collision"
+        type: "capsule"
+        fromto: "0.013 0.013 -0.014 0.081 0.016 -0.082"
+        size: "0.0125"
+        mass: 0.065
+      - suffix: "neck_collision"
+        type: "capsule"
+        fromto: "0.014 0.010 -0.014 -0.078 0.007 0.078"
+        size: "0.007"
+        mass: 0.030
+      - suffix: "tip_collision"
+        type: "box"
+        pos: "-0.079 0.006 0.079"
+        size: "0.002 0.006 0.002"
+        mass: 0.005
+        contype: 0
+        conaffinity: 0
+
+  - type: "mesh_part"
+    name: "part_type_c_2"
+    mesh_scale: "0.018 0.018 0.018"
+    visual_meshes:
+      - suffix: "handle"
+        mesh_file: "../../screwdriver/screwdriver_handle.obj"
+        material: "screwdriver_handle_mat"
+      - suffix: "neck"
+        mesh_file: "../../screwdriver/screwdriver_neck.obj"
+        material: "screwdriver_metal_mat"
+      - suffix: "tip"
+        mesh_file: "../../screwdriver/screwdriver_tip.obj"
+        material: "screwdriver_tip_mat"
+    pos: "-0.25 0.33 0.830"
+    quat: "0.61698607 0.61698607 0.34543913 0.34543913"
+    collision_material: "part_collision_mat"
+    friction: "4.5 1.2 0.03"
+    condim: "6"
+    solref: "0.008 1.2"
+    solimp: "0.95 0.99 0.001"
+    collision_geoms:
+      - suffix: "handle_collision"
+        type: "capsule"
+        fromto: "0.013 0.013 -0.014 0.081 0.016 -0.082"
+        size: "0.0125"
+        mass: 0.065
+      - suffix: "neck_collision"
+        type: "capsule"
+        fromto: "0.014 0.010 -0.014 -0.078 0.007 0.078"
+        size: "0.007"
+        mass: 0.030
+      - suffix: "tip_collision"
+        type: "box"
+        pos: "-0.079 0.006 0.079"
+        size: "0.002 0.006 0.002"
+        mass: 0.005
+        contype: 0
+        conaffinity: 0
+
+randomization:
+  jitter_parts:
+    names: []
+  shuffleable_parts:
+    names: []

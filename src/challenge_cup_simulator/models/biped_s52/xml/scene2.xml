@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mujoco model="Challenge Cup Scene 2">
+  <include file="biped_s52.xml"/>
+  <compiler angle="radian" autolimits="true"/>
+  <statistic center="0.6 0 1.0" extent="2.5"/>
+  <visual>
+    <headlight diffuse="0.5 0.5 0.5" ambient="0.25 0.25 0.25" specular="0 0 0"/>
+    <rgba haze="0.12 0.16 0.20 1"/>
+    <global azimuth="140" elevation="-18"/>
+  </visual>
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.35 0.45 0.55" rgb2="0.75 0.80 0.85" width="128" height="128"/>
+    <texture name="floor_mat_tex" type="2d" file="../../textures/matte_floor_green.png"/>
+    <material name="floor_mat" texrepeat="24 24" texuniform="false" rgba="0.24 0.38 0.30 1" reflectance="0.02" shininess="0.05" texture="floor_mat_tex"/>
+    <material name="factory_wall_mat" rgba="0.50 0.54 0.55 1" specular="0.04" shininess="0.02"/>
+    <material name="factory_wall_panel_mat" rgba="0.38 0.42 0.43 1" specular="0.03" shininess="0.02"/>
+    <material name="table_top_mat" rgba="0.10 0.30 0.10 1" specular="0.1" shininess="0.1"/>
+    <material name="table_leg_mat" rgba="0.60 0.60 0.60 1" specular="0.1" shininess="0.1"/>
+    <material name="parcel_brown_mat" rgba="0.88 0.84 0.73 1" specular="0.08" shininess="0.04"/>
+    <material name="parcel_yellow_mat" rgba="0.92 0.78 0.38 1" specular="0.08" shininess="0.04"/>
+    <material name="parcel_orange_mat" rgba="0.90 0.55 0.28 1" specular="0.08" shininess="0.04"/>
+    <material name="parcel_blue_mat" rgba="0.78 0.84 0.92 1" specular="0.08" shininess="0.04"/>
+    <material name="parcel_tape_mat" rgba="0.92 0.78 0.43 1" specular="0.04" shininess="0.02"/>
+    <material name="parcel_label_mat" rgba="0.96 0.96 0.88 1" specular="0.02" shininess="0.02"/>
+    <material name="parcel_label_line_mat" rgba="0.12 0.12 0.10 1" specular="0.01" shininess="0.01"/>
+    <material name="weighing_area_mat" rgba="0.10 0.62 0.26 0.85" emission="0.15"/>
+    <material name="drop_box_mat" rgba="0.10 0.62 0.34 0.55" emission="0.08"/>
+    <material name="drop_box_edge_mat" rgba="0.02 0.28 0.15 1"/>
+    <material name="sorting_area_a_mat" rgba="0.04 0.38 0.86 0.86" emission="0.12"/>
+    <material name="sorting_area_b_mat" rgba="0.88 0.42 0.08 0.86" emission="0.10"/>
+    <material name="sorting_area_c_mat" rgba="0.58 0.28 0.78 0.86" emission="0.10"/>
+    <material name="sorting_bin_a_wall_mat" rgba="0.03 0.24 0.58 0.92" specular="0.08" shininess="0.04"/>
+    <material name="sorting_bin_b_wall_mat" rgba="0.58 0.26 0.04 0.92" specular="0.08" shininess="0.04"/>
+    <material name="sorting_bin_c_wall_mat" rgba="0.36 0.16 0.52 0.92" specular="0.08" shininess="0.04"/>
+    <material name="part_type_a_mat" rgba="0.76 0.78 0.74 1" specular="0.45" shininess="0.35"/>
+    <material name="part_type_b_mat" rgba="0.22 0.22 0.22 1" specular="0.25" shininess="0.18"/>
+    <material name="screwdriver_handle_mat" rgba="0.72 0.12 0.10 1" specular="0.25" shininess="0.18"/>
+    <material name="screwdriver_metal_mat" rgba="0.78 0.78 0.74 1" specular="0.50" shininess="0.35"/>
+    <material name="screwdriver_tip_mat" rgba="0.04 0.04 0.04 1" specular="0.14" shininess="0.12"/>
+    <material name="part_collision_mat" rgba="0.10 0.10 0.10 0.12"/>
+    <mesh name="part_type_a_1_mesh" file="../../steel_pipe_fasteners/steel_pipe_fasteners_no_supports.stl" scale="0.0006667 0.0006667 0.0006667"/>
+    <mesh name="part_type_a_2_mesh" file="../../steel_pipe_fasteners/steel_pipe_fasteners_no_supports.stl" scale="0.0006667 0.0006667 0.0006667"/>
+    <mesh name="part_type_b_1_mesh" file="../../t_junction/T_junction.STL" scale="0.003 0.003 0.003"/>
+    <mesh name="part_type_b_2_mesh" file="../../t_junction/T_junction.STL" scale="0.003 0.003 0.003"/>
+    <mesh name="part_type_c_1_handle_mesh" file="../../screwdriver/screwdriver_handle.obj" scale="0.018 0.018 0.018"/>
+    <mesh name="part_type_c_1_neck_mesh" file="../../screwdriver/screwdriver_neck.obj" scale="0.018 0.018 0.018"/>
+    <mesh name="part_type_c_1_tip_mesh" file="../../screwdriver/screwdriver_tip.obj" scale="0.018 0.018 0.018"/>
+    <mesh name="part_type_c_2_handle_mesh" file="../../screwdriver/screwdriver_handle.obj" scale="0.018 0.018 0.018"/>
+    <mesh name="part_type_c_2_neck_mesh" file="../../screwdriver/screwdriver_neck.obj" scale="0.018 0.018 0.018"/>
+    <mesh name="part_type_c_2_tip_mesh" file="../../screwdriver/screwdriver_tip.obj" scale="0.018 0.018 0.018"/>
+  </asset>
+  <worldbody>
+    <geom name="floor" type="plane" size="8 8 0.05" material="floor_mat" condim="3" friction="1 0.1 0.1"/>
+    <light name="main_light" pos="0 0 5" dir="0 0 -1" directional="true" diffuse="0.65 0.65 0.65" specular="0 0 0"/>
+    <body name="factory_back_wall" pos="3.35 0 0.75">
+      <geom name="factory_back_wall_geom" type="box" size="0.04 2.80 0.75" mass="20" friction="1 0.1 0.01" material="factory_wall_mat"/>
+    </body>
+    <body name="factory_front_wall" pos="-2.70 0 0.75">
+      <geom name="factory_front_wall_geom" type="box" size="0.04 2.80 0.75" mass="20" friction="1 0.1 0.01" material="factory_wall_mat"/>
+    </body>
+    <body name="factory_left_wall" pos="0.325 2.80 0.75">
+      <geom name="factory_left_wall_geom" type="box" size="3.025 0.04 0.75" mass="20" friction="1 0.1 0.01" material="factory_wall_mat"/>
+    </body>
+    <body name="factory_right_wall" pos="0.325 -2.80 0.75">
+      <geom name="factory_right_wall_geom" type="box" size="3.025 0.04 0.75" mass="20" friction="1 0.1 0.01" material="factory_wall_mat"/>
+    </body>
+    <body name="factory_back_lower_panel" pos="3.305 0 0.28">
+      <geom name="factory_back_lower_panel_geom" type="box" size="0.012 2.65 0.10" mass="1" friction="1 0.1 0.01" material="factory_wall_panel_mat"/>
+    </body>
+    <body name="challenge_table" pos="0.05 0 0">
+      <geom name="challenge_table_top" type="box" size="0.40 0.70 0.015" pos="0 0 0.815" material="table_top_mat" mass="10" friction="1.2 0.2 0.01"/>
+      <geom name="challenge_table_leg_0" type="cylinder" size="0.03 0.4" pos="0.35 0.65 0.4" material="table_leg_mat" mass="2"/>
+      <geom name="challenge_table_leg_1" type="cylinder" size="0.03 0.4" pos="0.35 -0.65 0.4" material="table_leg_mat" mass="2"/>
+      <geom name="challenge_table_leg_2" type="cylinder" size="0.03 0.4" pos="-0.35 0.65 0.4" material="table_leg_mat" mass="2"/>
+      <geom name="challenge_table_leg_3" type="cylinder" size="0.03 0.4" pos="-0.35 -0.65 0.4" material="table_leg_mat" mass="2"/>
+    </body>
+    <body name="sorting_bin_a" pos="-0.04 -0.43 0.830">
+      <freejoint name="sorting_bin_a"/>
+      <geom name="sorting_bin_a_floor" type="box" size="0.1 0.11 0.005" pos="0 0 0.005" material="sorting_area_a_mat" contype="1" conaffinity="1" mass="0.2" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_a_front_low_wall" type="box" size="0.006 0.11 0.03" pos="-0.106 0 0.04" material="sorting_bin_a_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_a_back_high_wall" type="box" size="0.006 0.11 0.0725" pos="0.106 0 0.0825" material="sorting_bin_a_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_a_left_low_side" type="box" size="0.1 0.006 0.03" pos="0 0.116 0.04" material="sorting_bin_a_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_a_right_low_side" type="box" size="0.1 0.006 0.03" pos="0 -0.116 0.04" material="sorting_bin_a_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_a_left_rear_high_side" type="box" size="0.045 0.006 0.0725" pos="0.055 0.116 0.0825" material="sorting_bin_a_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_a_right_rear_high_side" type="box" size="0.045 0.006 0.0725" pos="0.055 -0.116 0.0825" material="sorting_bin_a_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+    </body>
+    <body name="sorting_bin_b" pos="-0.04 0.00 0.830">
+      <freejoint name="sorting_bin_b"/>
+      <geom name="sorting_bin_b_floor" type="box" size="0.1 0.11 0.005" pos="0 0 0.005" material="sorting_area_b_mat" contype="1" conaffinity="1" mass="0.2" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_b_front_low_wall" type="box" size="0.006 0.11 0.03" pos="-0.106 0 0.04" material="sorting_bin_b_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_b_back_high_wall" type="box" size="0.006 0.11 0.0725" pos="0.106 0 0.0825" material="sorting_bin_b_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_b_left_low_side" type="box" size="0.1 0.006 0.03" pos="0 0.116 0.04" material="sorting_bin_b_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_b_right_low_side" type="box" size="0.1 0.006 0.03" pos="0 -0.116 0.04" material="sorting_bin_b_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_b_left_rear_high_side" type="box" size="0.045 0.006 0.0725" pos="0.055 0.116 0.0825" material="sorting_bin_b_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_b_right_rear_high_side" type="box" size="0.045 0.006 0.0725" pos="0.055 -0.116 0.0825" material="sorting_bin_b_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+    </body>
+    <body name="sorting_bin_c" pos="-0.04 0.43 0.830">
+      <freejoint name="sorting_bin_c"/>
+      <geom name="sorting_bin_c_floor" type="box" size="0.1 0.11 0.005" pos="0 0 0.005" material="sorting_area_c_mat" contype="1" conaffinity="1" mass="0.2" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_c_front_low_wall" type="box" size="0.006 0.11 0.03" pos="-0.106 0 0.04" material="sorting_bin_c_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_c_back_high_wall" type="box" size="0.006 0.11 0.0725" pos="0.106 0 0.0825" material="sorting_bin_c_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_c_left_low_side" type="box" size="0.1 0.006 0.03" pos="0 0.116 0.04" material="sorting_bin_c_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_c_right_low_side" type="box" size="0.1 0.006 0.03" pos="0 -0.116 0.04" material="sorting_bin_c_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_c_left_rear_high_side" type="box" size="0.045 0.006 0.0725" pos="0.055 0.116 0.0825" material="sorting_bin_c_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+      <geom name="sorting_bin_c_right_rear_high_side" type="box" size="0.045 0.006 0.0725" pos="0.055 -0.116 0.0825" material="sorting_bin_c_wall_mat" contype="1" conaffinity="1" mass="0.1" friction="1.8 0.6 0.02" condim="6" solref="0.012 1.2" solimp="0.95 0.99 0.001"/>
+    </body>
+    <body name="part_type_a_1" pos="-0.28 -0.35 0.803" euler="0 0 0.05">
+      <freejoint name="part_type_a_1"/>
+      <geom name="part_type_a_1_visual" type="mesh" mesh="part_type_a_1_mesh" contype="0" conaffinity="0" group="2" material="part_type_a_mat"/>
+      <geom name="part_type_a_1_collision" type="box" size="0.0222 0.0451 0.0101" mass="0.08" friction="4.5 1.2 0.03" condim="6" solref="0.008 1.2" solimp="0.95 0.99 0.001" group="3" pos="-0.0055 -0.0134 0.0373" material="part_collision_mat"/>
+    </body>
+    <body name="part_type_a_2" pos="-0.28 -0.25 0.803" euler="0 0 0.82">
+      <freejoint name="part_type_a_2"/>
+      <geom name="part_type_a_2_visual" type="mesh" mesh="part_type_a_2_mesh" contype="0" conaffinity="0" group="2" material="part_type_a_mat"/>
+      <geom name="part_type_a_2_collision" type="box" size="0.0222 0.0451 0.0101" mass="0.08" friction="4.5 1.2 0.03" condim="6" solref="0.008 1.2" solimp="0.95 0.99 0.001" group="3" pos="-0.0055 -0.0134 0.0373" material="part_collision_mat"/>
+    </body>
+    <body name="part_type_b_1" pos="-0.28 -0.07 0.830" euler="0 0 -0.35">
+      <freejoint name="part_type_b_1"/>
+      <geom name="part_type_b_1_visual" type="mesh" mesh="part_type_b_1_mesh" contype="0" conaffinity="0" group="2" material="part_type_b_mat"/>
+      <geom name="part_type_b_1_collision" type="box" size="0.02365 0.027 0.02031" mass="0.12" friction="4.5 1.2 0.03" condim="6" solref="0.008 1.2" solimp="0.95 0.99 0.001" group="3" pos="-0.010 0 0.02035" material="part_collision_mat"/>
+    </body>
+    <body name="part_type_b_2" pos="-0.28 0.03 0.830" euler="0 0 0.72">
+      <freejoint name="part_type_b_2"/>
+      <geom name="part_type_b_2_visual" type="mesh" mesh="part_type_b_2_mesh" contype="0" conaffinity="0" group="2" material="part_type_b_mat"/>
+      <geom name="part_type_b_2_collision" type="box" size="0.02365 0.027 0.02031" mass="0.12" friction="4.5 1.2 0.03" condim="6" solref="0.008 1.2" solimp="0.95 0.99 0.001" group="3" pos="-0.010 0 0.02035" material="part_collision_mat"/>
+    </body>
+    <body name="part_type_c_1" pos="-0.25 0.19 0.830" quat="0.44208890 0.44208890 0.55186720 0.55186720">
+      <freejoint name="part_type_c_1"/>
+      <geom name="part_type_c_1_handle_visual" type="mesh" mesh="part_type_c_1_handle_mesh" contype="0" conaffinity="0" group="2" material="screwdriver_handle_mat"/>
+      <geom name="part_type_c_1_neck_visual" type="mesh" mesh="part_type_c_1_neck_mesh" contype="0" conaffinity="0" group="2" material="screwdriver_metal_mat"/>
+      <geom name="part_type_c_1_tip_visual" type="mesh" mesh="part_type_c_1_tip_mesh" contype="0" conaffinity="0" group="2" material="screwdriver_tip_mat"/>
+      <geom name="part_type_c_1_handle_collision" type="capsule" size="0.0125" mass="0.065" friction="4.5 1.2 0.03" condim="6" solref="0.008 1.2" solimp="0.95 0.99 0.001" group="3" fromto="0.013 0.013 -0.014 0.081 0.016 -0.082" material="part_collision_mat"/>
+      <geom name="part_type_c_1_neck_collision" type="capsule" size="0.007" mass="0.03" friction="4.5 1.2 0.03" condim="6" solref="0.008 1.2" solimp="0.95 0.99 0.001" group="3" fromto="0.014 0.010 -0.014 -0.078 0.007 0.078" material="part_collision_mat"/>
+      <geom name="part_type_c_1_tip_collision" type="box" size="0.002 0.006 0.002" mass="0.005" friction="4.5 1.2 0.03" condim="6" solref="0.008 1.2" solimp="0.95 0.99 0.001" group="3" pos="-0.079 0.006 0.079" material="part_collision_mat" contype="0" conaffinity="0"/>
+    </body>
+    <body name="part_type_c_2" pos="-0.25 0.33 0.830" quat="0.61698607 0.61698607 0.34543913 0.34543913">
+      <freejoint name="part_type_c_2"/>
+      <geom name="part_type_c_2_handle_visual" type="mesh" mesh="part_type_c_2_handle_mesh" contype="0" conaffinity="0" group="2" material="screwdriver_handle_mat"/>
+      <geom name="part_type_c_2_neck_visual" type="mesh" mesh="part_type_c_2_neck_mesh" contype="0" conaffinity="0" group="2" material="screwdriver_metal_mat"/>
+      <geom name="part_type_c_2_tip_visual" type="mesh" mesh="part_type_c_2_tip_mesh" contype="0" conaffinity="0" group="2" material="screwdriver_tip_mat"/>
+      <geom name="part_type_c_2_handle_collision" type="capsule" size="0.0125" mass="0.065" friction="4.5 1.2 0.03" condim="6" solref="0.008 1.2" solimp="0.95 0.99 0.001" group="3" fromto="0.013 0.013 -0.014 0.081 0.016 -0.082" material="part_collision_mat"/>
+      <geom name="part_type_c_2_neck_collision" type="capsule" size="0.007" mass="0.03" friction="4.5 1.2 0.03" condim="6" solref="0.008 1.2" solimp="0.95 0.99 0.001" group="3" fromto="0.014 0.010 -0.014 -0.078 0.007 0.078" material="part_collision_mat"/>
+      <geom name="part_type_c_2_tip_collision" type="box" size="0.002 0.006 0.002" mass="0.005" friction="4.5 1.2 0.03" condim="6" solref="0.008 1.2" solimp="0.95 0.99 0.001" group="3" pos="-0.079 0.006 0.079" material="part_collision_mat" contype="0" conaffinity="0"/>
+    </body>
+  </worldbody>
+</mujoco>
