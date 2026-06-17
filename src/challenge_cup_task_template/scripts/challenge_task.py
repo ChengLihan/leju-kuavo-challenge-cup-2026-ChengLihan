@@ -736,46 +736,7 @@ class Scene2Controller:
         rospy.loginfo("=== 场景二：零件分拣归档（seed=%d） ===", self._seed)
         self._robot.look_at(pitch=+20.0, yaw=0.0)
 
-        rospy.loginfo("等待头部到位 (+20°) ...")
-        self._perception.wait_for_head_pitch(+20.0)
 
-        rospy.loginfo("等待相机数据就绪...")
-        if not self._perception.wait_for_data():
-            rospy.logerr("相机数据未就绪，退出")
-            return
-
-        # 确保 images 目录存在
-        images_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "images")
-        os.makedirs(images_dir, exist_ok=True)
-
-        crop_size = 640
-
-        # 每个 seed 截取 3 张，间隔 0.8s 以获取不同帧
-        for i in range(3):
-            # 获取头部相机图像
-            head_img = self._perception._get_cv_image("head")
-            if head_img is None:
-                rospy.logerr("[seed=%d 第%d张] 未能获取头部相机图像", self._seed, i + 1)
-                continue
-
-            h, w = head_img.shape[:2]
-            # 截取中下方 640x640 区域
-            x_start = (w - crop_size) // 2
-            y_start = h - crop_size
-            cropped = head_img[y_start:y_start + crop_size, x_start:x_start + crop_size]
-
-            save_path = os.path.join(images_dir,
-                                     "scene2_seed{}_c{}.jpg".format(self._seed, i + 1))
-            cv2.imwrite(save_path, cropped)
-            rospy.loginfo("已保存: %s (%dx%d)", save_path, crop_size, crop_size)
-
-            if i < 2:
-                rospy.sleep(0.8)
-
-        self._exit_after_run = True
-        rospy.loginfo("场景二（seed=%d）数据集采集完成，共 3 张", self._seed)
 
     def _detect_and_pick(self):
         # TODO: 识别零件类别
