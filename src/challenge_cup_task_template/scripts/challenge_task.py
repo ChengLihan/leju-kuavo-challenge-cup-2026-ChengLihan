@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
+
 """
 挑战杯三场景统一任务入口。
 
 推荐运行方式：
-  rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3
-  rosrun challenge_cup_task_template challenge_task.py --scene scene2 --seed 3
-  rosrun challenge_cup_task_template challenge_task.py --scene scene3 --seed 3
+rosrun challenge_cup_task_template challenge_task.py --scene scene1 --seed 3
+rosrun challenge_cup_task_template challenge_task.py --scene scene2 --seed 3
+rosrun challenge_cup_task_template challenge_task.py --scene scene3 --seed 3
 """
 
 import argparse
@@ -14,22 +15,23 @@ import sys
 import numpy as np
 
 SCENE_CONFIGS = {
-    "scene1": {
-        "node_name": "challenge_task_scene1",
-        "title": "场景一：包裹称重与摆放",
-    },
-    "scene2": {
-        "node_name": "challenge_task_scene2",
-        "title": "场景二：分拣归档",
-    },
-    "scene3": {
-        "node_name": "challenge_task_scene3",
-        "title": "场景三：SMT 料盘出库",
-    },
+"scene1": {
+"node_name": "challenge_task_scene1",
+"title": "场景一：包裹称重与摆放",
+},
+"scene2": {
+"node_name": "challenge_task_scene2",
+"title": "场景二：分拣归档",
+},
+"scene3": {
+"node_name": "challenge_task_scene3",
+"title": "场景三：SMT 料盘出库",
+},
 }
 
-
 def _load_launcher():
+    # 公共启动器位于受保护包 challenge_cup_simulator/utils/（选手不可改动），
+    # 从那里导入，确保完整性校验无法被绕过。
     try:
         import rospkg
         sim_utils = os.path.join(rospkg.RosPack().get_path("challenge_cup_simulator"), "utils")
@@ -39,11 +41,6 @@ def _load_launcher():
     sys.path.insert(0, sim_utils)
     from challenge_sim_launcher import ChallengeSimLauncher
     return ChallengeSimLauncher
-
-
-# ═══════════════════════════════════════════════════════════
-# Hough 线段 → 矩形匹配（模块级工具函数）
-# ═══════════════════════════════════════════════════════════
 
 def _lines_to_infos(lines):
     """将 HoughLinesP 结果转为 [(x1,y1,x2,y2, angle_0_pi, length, mx,my), ...]。
@@ -61,14 +58,12 @@ def _lines_to_infos(lines):
                       a, length, mx, my))
     return infos
 
-
 def _angle_diff(a, b):
     """两条线夹角（归一化到 [0, π/2] 内的锐角）。"""
     d = abs(a - b)
     if d > np.pi / 2:
         d = np.pi - d
     return d
-
 
 def _line_intersection(l1, l2):
     """求两条无限直线交点。每线给 (x1,y1,x2,y2)。"""
@@ -79,7 +74,6 @@ def _line_intersection(l1, l2):
         return None
     t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / den
     return x1 + t * (x2 - x1), y1 + t * (y2 - y1)
-
 
 def _match_rectangles(infos):
     """从 ≤60 条线段 infos 中匹配矩形。角度分8个桶，
@@ -152,7 +146,6 @@ def _match_rectangles(infos):
             filtered.append(r)
     return filtered[:4]
 
-
 class RobotBase:
     """封装机器人移动、手臂、夹爪、头部等底层 ROS 接口。"""
 
@@ -204,18 +197,17 @@ class RobotBase:
             self._rospy.logwarn("切换手臂模式失败: %s", e)
 
     def send_arm_trajectory(self, left_joints=None, right_joints=None):
-        """发送双臂关节角度，各 7 维向量，单位：度。"""
+        """发送双臂关节角度（始终14维），单位：度。"""
         LEFT_NAMES = ["l_arm_pitch", "l_arm_roll", "l_arm_yaw",
                       "l_forearm_pitch", "l_hand_yaw", "l_hand_pitch", "l_hand_roll"]
         RIGHT_NAMES = ["r_arm_pitch", "r_arm_roll", "r_arm_yaw",
                        "r_forearm_pitch", "r_hand_yaw", "r_hand_pitch", "r_hand_roll"]
+        # 始终发14个关节：未指定的手臂填充零位
+        lj = list(left_joints) if left_joints is not None else [0.0] * 7
+        rj = list(right_joints) if right_joints is not None else [0.0] * 7
         msg = self._JointState()
-        if left_joints is not None:
-            msg.name += LEFT_NAMES
-            msg.position += list(left_joints)
-        if right_joints is not None:
-            msg.name += RIGHT_NAMES
-            msg.position += list(right_joints)
+        msg.name = LEFT_NAMES + RIGHT_NAMES
+        msg.position = lj + rj
         self._arm_traj_pub.publish(msg)
 
     @property
@@ -242,7 +234,6 @@ class RobotBase:
         except Exception as e:
             self._rospy.logwarn("夹爪控制失败: %s", e)
 
-
 class Perception:
     """视觉感知模块：RGB/D相机物体检测与3D定位。"""
 
@@ -264,6 +255,13 @@ class Perception:
 
         self._tf_buffer = tf2_ros.Buffer()
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer)
+
+        # ROS1 tf2: 注册 PointStamped/PoseStamped 等几何消息类型转换
+        try:
+            import tf2_geometry_msgs  # noqa: F401
+            rospy.loginfo("tf2_geometry_msgs 已加载，PointStamped TF 支持已注册")
+        except Exception as e:
+            rospy.logwarn("tf2_geometry_msgs 导入失败: %s", e)
 
         self._sub_h = rospy.Subscriber(
             "/cam_h/color/image_raw/compressed", CompressedImage,
@@ -292,6 +290,124 @@ class Perception:
         self._last_viz_edge = None
         self._last_viz_contour = None
 
+        # ── YOLO 分割检测器 (Scene2) ──
+        self._yolo_detector = None
+        try:
+            # 确保 scripts 目录在 Python 路径中
+            _scripts_dir = os.path.dirname(os.path.abspath(__file__))
+            if _scripts_dir not in sys.path:
+                sys.path.insert(0, _scripts_dir)
+
+            # 注入 yolo_gpu site-packages（仅用于导入 ultralytics）
+            import glob as _glob
+            _yolo_sp_dirs = []
+            for _yolo_base in ["/root/yolo_gpu", os.path.expanduser("~/yolo_gpu")]:
+                _sp = os.path.join(_yolo_base, "lib")
+                if not os.path.isdir(_sp):
+                    continue
+                _site_pkgs = sorted(_glob.glob(
+                    os.path.join(_sp, "python*", "site-packages")))
+                _yolo_sp_dirs = _site_pkgs
+                if _site_pkgs:
+                    break
+
+            # 临时注入 yolo_gpu site-packages（导入完成后移除，避免污染 ROS 消息类型）
+            _injected = []
+            for _sp_dir in reversed(_yolo_sp_dirs):
+                if _sp_dir not in sys.path:
+                    sys.path.insert(0, _sp_dir)
+                    _injected.append(_sp_dir)
+                    rospy.loginfo("临时注入 yolo_gpu site-packages: %s", _sp_dir)
+
+            # 清除可能被 ROS 预加载的旧 ultralytics 缓存
+            for _mod in list(sys.modules):
+                if _mod == "ultralytics" or _mod.startswith("ultralytics."):
+                    del sys.modules[_mod]
+
+            import traceback as _tb
+            rospy.loginfo("尝试导入 scene2_yolo_detector (scripts_dir=%s)...",
+                          _scripts_dir)
+
+            from scene2_yolo_detector import Scene2YOLODetector
+            rospy.loginfo("scene2_yolo_detector 导入成功")
+
+            # 移除临时注入的路径，恢复 ROS 消息类型优先级
+            for _sp_dir in _injected:
+                if _sp_dir in sys.path:
+                    sys.path.remove(_sp_dir)
+            if _injected:
+                rospy.loginfo("已移除临时 yolo_gpu site-packages，恢复 ROS 路径")
+
+            # 搜索模型文件（多路径回退，尝试多个文件名）
+            _model_names = ["yolov8n_seg_scene2_demo.pt", "best.pt"]
+            _candidates = []
+
+            for _model_name in _model_names:
+                # 候选1: rospkg 路径
+                try:
+                    import rospkg
+                    _pkg = rospkg.RosPack().get_path("challenge_cup_task_template")
+                    _candidates.append(os.path.normpath(
+                        os.path.join(_pkg, "..", "..", "models", "yolo", _model_name)))
+                except Exception:
+                    pass
+
+                # 候选2: __file__ 相对路径
+                _candidates.append(os.path.normpath(
+                    os.path.join(_scripts_dir, "..", "..", "..", "models", "yolo", _model_name)))
+
+                # 候选3: 工作目录相对路径
+                _candidates.append(os.path.normpath(
+                    os.path.join(os.getcwd(), "models", "yolo", _model_name)))
+
+            # 候选4: 搜索 runs/ 目录下的 best.pt
+            try:
+                _ws_root = os.path.normpath(
+                    os.path.join(_scripts_dir, "..", "..", ".."))
+                import glob as _glob
+                _bests = sorted(_glob.glob(
+                    os.path.join(_ws_root, "runs", "**", "weights", "best.pt"),
+                    recursive=True))
+                if _bests:
+                    _candidates.append(_bests[-1])  # 最新的 best.pt
+            except Exception:
+                pass
+
+            # 去重后逐个检查
+            model_path = None
+            for _c in _candidates:
+                rospy.loginfo("  候选路径: %s  exists=%s", _c, os.path.exists(_c))
+                if os.path.exists(_c):
+                    model_path = _c
+                    break
+
+            if model_path is None:
+                rospy.logerr("YOLO 模型未找到! 搜索的候选路径:\n  %s\n"
+                             "请执行:\n"
+                             "  cp $(find runs -path '*/weights/best.pt' "
+                             "| sort | tail -1) models/yolo/best.pt",
+                             "\n  ".join(_candidates))
+            else:
+                rospy.loginfo("正在加载 YOLO 模型: %s", model_path)
+                self._yolo_detector = Scene2YOLODetector(
+                    model_path=model_path, conf=0.15, imgsz=640, device=0)
+                rospy.loginfo("YOLO Scene2 检测器已加载 (类别: %s)",
+                              self._yolo_detector.class_names)
+        except Exception as e:
+            import traceback as _tb
+            rospy.logerr("YOLO 检测器加载失败:\n%s",
+                         _tb.format_exc())
+
+        # 可视化发布器 (YOLO debug)
+        self._pub_yolo_debug = rospy.Publisher(
+            "/challenge/vision/yolo_debug", Image, queue_size=1)
+        self._last_viz_yolo = None
+
+        # RViz MarkerArray (3D 目标位置)
+        from visualization_msgs.msg import MarkerArray
+        self._pub_markers = rospy.Publisher(
+            "/challenge/vision/objects_3d", MarkerArray, queue_size=1)
+
         rospy.sleep(1.0)
 
     # ── callbacks ──────────────────────────────────────
@@ -307,15 +423,23 @@ class Perception:
     def _cb_cam_info(self, msg):
         self._cam_info = msg
         self._cam_frame = msg.header.frame_id
+        if not hasattr(self, '_cam_frame_logged'):
+            self._rospy.loginfo("camera frame: %s", self._cam_frame)
+            self._cam_frame_logged = True
 
     def _cb_sensors(self, msg):
         q = msg.joint_data.joint_q
-        # 打印一次数组长度，便于确认索引
         if not hasattr(self, '_sensor_len_logged'):
-            self._rospy.loginfo("sensors joint_q 长度=%d  末6位: %s",
-                                len(q), str([round(v, 3) for v in q[-6:]]))
+            self._rospy.loginfo("sensors joint_q 长度=%d  全部: %s",
+                                len(q),
+                                str([round(v, 3) for v in q]))
             self._sensor_len_logged = True
-        # 尝试找 head pitch：文档说末2位 [yaw, pitch]
+            # 同时打印关节名列表（如果消息包含）
+            if hasattr(msg.joint_data, 'joint_name'):
+                names = msg.joint_data.joint_name
+                for i, n in enumerate(names):
+                    self._rospy.loginfo("  joint[%d] %s = %.3f",
+                                        i, n, q[i] if i < len(q) else 0)
         if len(q) >= 2:
             self._head_yaw_rad = q[-2]
             self._head_pitch_rad = q[-1]
@@ -361,7 +485,86 @@ class Perception:
     def _get_depth_cv(self):
         if self._latest_depth is None:
             return None
-        return self._bridge.compressed_imgmsg_to_cv2(self._latest_depth, "passthrough")
+
+        msg = self._latest_depth
+        depth_raw = None
+
+        # 方法1: cv2.imdecode 直接解压 PNG
+        # data 可能带有前导零字节（已观察到 12 字节 padding），
+        # 需要定位 PNG 魔数 \x89PNG
+        try:
+            import cv2 as _cv2
+            raw_bytes = msg.data
+            # 查找 PNG 魔数
+            png_magic = b'\x89PNG\r\n\x1a\n'
+            png_start = raw_bytes.find(png_magic)
+            if png_start < 0:
+                png_start = 0  # 回退：假设无前导
+            if png_start > 0 and not hasattr(self, '_depth_padding_logged'):
+                self._rospy.loginfo("深度 PNG 前有 %d 字节 padding，跳过", png_start)
+                self._depth_padding_logged = True
+            depth_raw = _cv2.imdecode(
+                np.frombuffer(raw_bytes[png_start:], np.uint8),
+                _cv2.IMREAD_UNCHANGED)
+            if depth_raw is not None and depth_raw.size > 0:
+                if not hasattr(self, '_depth_decode_method_logged'):
+                    self._rospy.loginfo("深度图通过 cv2.imdecode 解码成功 "
+                                        "(shape=%s dtype=%s)",
+                                        depth_raw.shape, depth_raw.dtype)
+                    self._depth_decode_method_logged = True
+        except Exception as e:
+            if not hasattr(self, '_depth_cv2_err'):
+                self._rospy.logwarn("cv2.imdecode 失败: %s", e)
+                self._depth_cv2_err = True
+
+        # 方法2: cv_bridge compressed_imgmsg_to_cv2 (尝试多种编码)
+        if depth_raw is None:
+            for encoding in ("passthrough", "32FC1", "16UC1",
+                             "16UC1; compressedDepth png",
+                             "mono16", "mono8"):
+                try:
+                    depth_raw = self._bridge.compressed_imgmsg_to_cv2(
+                        msg, encoding)
+                    if depth_raw is not None and depth_raw.size > 0:
+                        if not hasattr(self, '_depth_decode_method_logged'):
+                            self._rospy.loginfo("深度图通过 cv_bridge 解码成功 "
+                                                "(encoding=%s shape=%s dtype=%s)",
+                                                encoding, depth_raw.shape,
+                                                depth_raw.dtype)
+                            self._depth_decode_method_logged = True
+                        break
+                except Exception:
+                    continue
+
+        if depth_raw is None:
+            if not hasattr(self, '_depth_decode_warned'):
+                self._rospy.logwarn("compressedDepth 解码失败 "
+                                    "(format=%s, data_len=%d, "
+                                    "data[:20]=%s)",
+                                    getattr(msg, 'format', '?'),
+                                    len(msg.data),
+                                    msg.data[:20].hex())
+                self._depth_decode_warned = True
+            return None
+
+        # 转为 float32 米单位
+        if depth_raw.dtype == np.uint16:
+            depth_m = depth_raw.astype(np.float32) / 1000.0
+        elif depth_raw.dtype in (np.float32, np.float64):
+            depth_m = depth_raw.astype(np.float32)
+        else:
+            depth_m = depth_raw.astype(np.float32)
+
+        # 打印一次格式信息
+        if not hasattr(self, '_depth_fmt_logged'):
+            self._rospy.loginfo("深度图: shape=%s dtype=%s→float32 "
+                                "min=%.3f max=%.3f m",
+                                depth_raw.shape, depth_raw.dtype,
+                                float(np.min(depth_m[depth_m > 0]))
+                                if np.any(depth_m > 0) else -1,
+                                float(np.max(depth_m)))
+            self._depth_fmt_logged = True
+        return depth_m
 
     # ── 方块检测（头部 RGB） ────────────────────────────
 
@@ -446,6 +649,168 @@ class Perception:
             self._pub_edge.publish(self._bridge.cv2_to_imgmsg(self._last_viz_edge, "bgr8"))
         if hasattr(self, '_last_viz_contour') and self._last_viz_contour is not None:
             self._pub_contour.publish(self._bridge.cv2_to_imgmsg(self._last_viz_contour, "bgr8"))
+        if hasattr(self, '_last_viz_yolo') and self._last_viz_yolo is not None:
+            self._pub_yolo_debug.publish(self._bridge.cv2_to_imgmsg(self._last_viz_yolo, "bgr8"))
+
+    # ── YOLO 分割检测 (Scene2) ──────────────────────
+
+    def detect_objects_yolo(self):
+        """用 YOLOv8-seg 检测头部相机画面中的 Scene2 零件。
+        返回 list[dict]，每个实例含 class_name/confidence/bbox/mask/center_uv。
+        """
+        if self._yolo_detector is None:
+            self._rospy.logwarn("YOLO 检测器未加载，无法检测")
+            return []
+
+        cv_img = self._get_cv_image("head")
+        if cv_img is None:
+            self._rospy.logwarn("未获取到头部相机图像")
+            return []
+
+        instances = self._yolo_detector.detect(cv_img)
+        self._rospy.loginfo("YOLO 检测到 %d 个目标", len(instances))
+
+        # 发布 YOLO debug 可视化
+        if instances:
+            vis = self._yolo_detector.draw_results(cv_img, instances)
+            self._last_viz_yolo = vis
+            self._pub_yolo_debug.publish(self._bridge.cv2_to_imgmsg(vis, "bgr8"))
+
+        return instances
+
+    # ── YOLO + Depth + TF → 3D (Scene2 第六步) ─────
+
+    def get_objects_3d_yolo(self):
+        """YOLO分割 + 深度图 + TF → base_link 坐标系下的3D目标列表。
+
+        流程:
+          1. YOLO 检测 → mask / center_uv  (始终执行+发布debug图)
+          2. mask 区域取稳定深度中值
+          3. 像素 + 深度 → 相机3D
+          4. TF 变换 → base_link
+
+        返回 list[dict]:
+          { class_name, confidence, center_uv, position_camera, position_base,
+            mask_area, target_bin }
+        """
+        if self._yolo_detector is None:
+            if not hasattr(self, '_yolo_warned'):
+                self._rospy.logwarn("YOLO 检测器未加载，跳过检测")
+                self._yolo_warned = True
+            return []
+
+        cv_img = self._get_cv_image("head")
+        if cv_img is None:
+            self._rospy.logwarn_throttle(5, "未获取到头部相机RGB图像")
+            return []
+
+        # ── 步骤0: YOLO 检测 (始终执行，发布debug图) ──
+        t0 = self._rospy.Time.now()
+        instances = self._yolo_detector.detect(cv_img)
+        dt = (self._rospy.Time.now() - t0).to_sec() * 1000
+        self._rospy.loginfo_throttle(2, "YOLO: %d 目标 %.0fms",
+                                      len(instances), dt)
+
+        # 始终发布 YOLO debug 图（稍后追加重投影点）
+        vis = self._yolo_detector.draw_results(cv_img, instances)
+
+        if not instances:
+            self._last_viz_yolo = vis
+            self._pub_yolo_debug.publish(self._bridge.cv2_to_imgmsg(vis, "bgr8"))
+            return []
+
+        # ── 步骤1-4: depth + TF → 3D (失败不影响 YOLO 检测) ──
+        depth_cv = self._get_depth_cv()
+        cam_ok = self._cam_info is not None
+
+        # 状态仅首次打印（或出错时）
+        if not hasattr(self, '_status_ok'):
+            self._rospy.loginfo("感知链路就绪: depth cam_info tf_buffer 全部可用")
+            self._status_ok = True
+
+        if depth_cv is None:
+            return instances
+
+        if not cam_ok:
+            return instances
+
+        # 获取相机内参矩阵
+        K = self._cam_info.K
+        camera_matrix = np.array([[K[0], 0, K[2]],
+                                  [0, K[4], K[5]],
+                                  [0, 0, 1]], dtype=np.float64)
+
+        results = []
+        tf_ok = 0
+        for inst in instances:
+            mask = inst["mask"]
+            u, v = inst["center_uv"]
+
+            # 步骤1: mask → 稳定深度 (depth_cv 已经是米单位 float32)
+            Z = self._yolo_detector.get_mask_median_depth(depth_cv, mask)
+            if Z is None or Z <= 0:
+                continue
+
+            # 步骤2: 像素 → 相机3D
+            fx, fy = camera_matrix[0, 0], camera_matrix[1, 1]
+            cx, cy = camera_matrix[0, 2], camera_matrix[1, 2]
+            X_cam = (u - cx) * Z / fx
+            Y_cam = (v - cy) * Z / fy
+            Z_cam = Z
+
+            # 步骤3: TF 变换 → base_link
+            pose_base = self._transform_to_base(X_cam, Y_cam, Z_cam)
+            if pose_base is None:
+                continue
+            tf_ok += 1
+
+            # 步骤4: 重投影验证 (base → camera → uv)
+            cam_reproj = self._transform_from_base(*pose_base)
+            reproj_uv = None
+            if cam_reproj is not None:
+                fx, fy = camera_matrix[0, 0], camera_matrix[1, 1]
+                cx, cy = camera_matrix[0, 2], camera_matrix[1, 2]
+                u_reproj = cam_reproj[0] * fx / cam_reproj[2] + cx
+                v_reproj = cam_reproj[1] * fy / cam_reproj[2] + cy
+                reproj_uv = [round(u_reproj, 1), round(v_reproj, 1)]
+
+            results.append({
+                "class_name":       inst["class_name"],
+                "class_id":         inst["class_id"],
+                "confidence":       inst["confidence"],
+                "center_uv":        inst["center_uv"],
+                "reproj_uv":        reproj_uv,
+                "position_camera":  [round(X_cam, 4), round(Y_cam, 4), round(Z_cam, 4)],
+                "position_base":    [round(x, 4) for x in pose_base],
+                "mask_area":        inst["mask_area"],
+                "target_bin":       inst["target_bin"],
+            })
+
+        # ── 追加重投影验证点到 debug 图 ──
+        import cv2 as _cv2
+        for r in results:
+            if r.get("reproj_uv"):
+                ur, vr = int(r["reproj_uv"][0]), int(r["reproj_uv"][1])
+                _cv2.drawMarker(vis, (ur, vr), (0, 255, 0),
+                                _cv2.MARKER_CROSS, 20, 2)
+                uc, vc = int(r["center_uv"][0]), int(r["center_uv"][1])
+                _cv2.line(vis, (uc, vc), (ur, vr), (0, 255, 255), 1)
+
+        self._last_viz_yolo = vis
+        self._pub_yolo_debug.publish(self._bridge.cv2_to_imgmsg(vis, "bgr8"))
+
+        # ── 发布 RViz MarkerArray ──
+        self._publish_3d_markers(results)
+
+        self._rospy.loginfo_throttle(2, "YOLO 3D: %d/%d TF=%d",
+                                      len(results), len(instances), tf_ok)
+
+        # 如果 YOLO 有结果但 3D 全失败，返回原始 instances，
+        # 让上层知道是 depth/TF 问题，而不是 YOLO 没检测到。
+        if not results and instances:
+            return instances
+
+        return results
 
     # ── 像素 → 3D 坐标 ───────────────────────────────
 
@@ -474,19 +839,119 @@ class Perception:
     # ── TF 坐标变换 ──────────────────────────────────
 
     def _transform_to_base(self, x_cam, y_cam, z_cam):
+        """camera frame 下 3D 点转换到 base_link。"""
         from geometry_msgs.msg import PointStamped
+
+        # ROS1 tf2 必须导入这个，才能注册 PointStamped 的 do_transform
+        import tf2_geometry_msgs  # noqa: F401
+
+        if self._cam_frame is None:
+            self._rospy.logwarn_throttle(2.0, "cam_frame 为空，无法 TF")
+            return None
+
         p = PointStamped()
         p.header.frame_id = self._cam_frame
         p.header.stamp = self._rospy.Time(0)
-        p.point.x = x_cam
-        p.point.y = y_cam
-        p.point.z = z_cam
+        p.point.x = float(x_cam)
+        p.point.y = float(y_cam)
+        p.point.z = float(z_cam)
+
         try:
-            p_base = self._tf_buffer.transform(p, "base_link",
-                                               timeout=self._rospy.Duration(1.0))
+            p_base = self._tf_buffer.transform(
+                p, "base_link",
+                timeout=self._rospy.Duration(1.0))
             return (p_base.point.x, p_base.point.y, p_base.point.z)
         except Exception as e:
-            self._rospy.logwarn("TF 变换失败: %s", e)
+            self._rospy.logwarn_throttle(
+                2.0,
+                "TF 变换失败: %s -> base_link, err=%s",
+                self._cam_frame, e)
+            return None
+
+    def _publish_3d_markers(self, results):
+        """发布 RViz MarkerArray：每个目标在 base_link 下的彩色球体 + 文字。"""
+        from visualization_msgs.msg import Marker, MarkerArray
+
+        BIN_COLORS = {
+            "blue_bin":   (0.0, 0.0, 1.0),
+            "orange_bin": (1.0, 0.5, 0.0),
+            "purple_bin": (1.0, 0.0, 1.0),
+        }
+
+        markers = MarkerArray()
+        for i, r in enumerate(results):
+            x, y, z = r["position_base"]
+            color = BIN_COLORS.get(r.get("target_bin", ""), (0.0, 1.0, 0.0))
+
+            # 球体
+            m = Marker()
+            m.header.frame_id = "base_link"
+            m.header.stamp = self._rospy.Time.now()
+            m.ns = "objects_3d"
+            m.id = i
+            m.type = Marker.SPHERE
+            m.action = Marker.ADD
+            m.pose.position.x = x
+            m.pose.position.y = y
+            m.pose.position.z = z
+            m.pose.orientation.w = 1.0
+            m.scale.x = m.scale.y = m.scale.z = 0.03
+            m.color.r, m.color.g, m.color.b = color
+            m.color.a = 0.8
+            markers.markers.append(m)
+
+            # 文字标签
+            mt = Marker()
+            mt.header.frame_id = "base_link"
+            mt.header.stamp = self._rospy.Time.now()
+            mt.ns = "objects_3d_labels"
+            mt.id = i + 1000
+            mt.type = Marker.TEXT_VIEW_FACING
+            mt.action = Marker.ADD
+            mt.pose.position.x = x
+            mt.pose.position.y = y
+            mt.pose.position.z = z + 0.04
+            mt.scale.z = 0.03
+            mt.color.r, mt.color.g, mt.color.b = color
+            mt.color.a = 1.0
+            mt.text = "{} {:.2f}".format(r["class_name"], r["confidence"])
+            markers.markers.append(mt)
+
+        # 删除旧 marker（如果数量减少）
+        for j in range(len(results), 20):
+            m = Marker()
+            m.header.frame_id = "base_link"
+            m.header.stamp = self._rospy.Time.now()
+            m.ns = "objects_3d"
+            m.id = j
+            m.action = Marker.DELETE
+            markers.markers.append(m)
+
+        self._pub_markers.publish(markers)
+
+    def _transform_from_base(self, x_base, y_base, z_base):
+        """base_link → camera frame 逆向变换，用于重投影验证。"""
+        from geometry_msgs.msg import PointStamped
+        import tf2_geometry_msgs  # noqa: F401
+
+        if self._cam_frame is None:
+            return None
+
+        p = PointStamped()
+        p.header.frame_id = "base_link"
+        p.header.stamp = self._rospy.Time(0)
+        p.point.x = float(x_base)
+        p.point.y = float(y_base)
+        p.point.z = float(z_base)
+
+        try:
+            p_cam = self._tf_buffer.transform(
+                p, self._cam_frame,
+                timeout=self._rospy.Duration(1.0))
+            return (p_cam.point.x, p_cam.point.y, p_cam.point.z)
+        except Exception as e:
+            self._rospy.logwarn_throttle(
+                2.0, "逆向 TF 失败 base_link->%s: %s", self._cam_frame, e)
             return None
 
     # ── 对外接口 ──────────────────────────────────────
@@ -539,7 +1004,6 @@ class Perception:
             return None
         return (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]))
 
-
 class Navigation:
     """导航模块：负责将机器人移动到目标位置。"""
 
@@ -566,9 +1030,8 @@ class Navigation:
         while abs(yaw_error) > tolerance:
             az = np.clip(yaw_error, -0.5, 0.5)
             self._robot.move_velocity(angular_z=az, duration=0.3)
-            yaw_error = target_yaw
+            yaw_error -= az * 0.3
             rospy.sleep(0.1)
-
 
 class Manipulation:
     """手臂与夹爪操作模块。"""
@@ -617,7 +1080,6 @@ class Manipulation:
         """回到初始位姿。"""
         home_pos = [0.0, 0.0, 0.0, -45.0, 0.0, 0.0, 0.0]
         self.move_arm_to_pose(arm, home_pos)
-
 
 class Scene1Controller:
     """场景一：包裹称重与摆放（含数据集采集模式）。"""
@@ -718,9 +1180,29 @@ class Scene1Controller:
         self._manip.pick("right")
         rospy.sleep(0.3)
 
-
 class Scene2Controller:
-    """场景二：零件分拣归档（含数据集采集模式）。"""
+    """场景二：零件分拣归档。
+
+    管线:
+      头部相机 YOLO + 深度 + TF → 3D 目标列表
+      → 按类别排序选择目标
+      → 导航 + 预抓取 → 腕部相机二次校准
+      → 抓取 → 移动到对应颜色箱 → 放置
+    """
+
+    # ── 类别 → 目标箱 ──
+    BIN_MAP = {
+        "screwdriver": "purple_bin",
+        "pipe_clamp":  "blue_bin",
+        "pipe_fitting": "orange_bin",
+    }
+
+    # ── 目标箱 → base_link 下的大致放置位置 ──
+    BIN_POSITIONS = {
+        "purple_bin":  (0.45, -0.25),
+        "blue_bin":    (0.45,  0.00),
+        "orange_bin":  (0.45,  0.25),
+    }
 
     def __init__(self, robot, perception, navigation, manipulation, seed=0):
         self._robot = robot
@@ -729,25 +1211,487 @@ class Scene2Controller:
         self._manip = manipulation
         self._seed = seed
         self._exit_after_run = False
+        # 双臂状态追踪：始终同步发送双手，避免单手动作导致另一手回零
+        self._last_left  = [0.0, 45.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        self._last_right = [0.0, -45.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+    def _send_arms(self, left=None, right=None):
+        """发送双臂命令，保持未指定手臂的 last_known 状态。"""
+        if left is not None:
+            self._last_left = list(left)
+        if right is not None:
+            self._last_right = list(right)
+        self._robot.send_arm_trajectory(
+            left_joints=self._last_left, right_joints=self._last_right)
+
+    def _hold_arms(self):
+        """重发当前双臂位置，防止外部控制器超时释放。"""
+        self._robot.send_arm_trajectory(
+            left_joints=self._last_left, right_joints=self._last_right)
+
+    def _sleep_hold(self, duration):
+        """带手臂位置保持的延时, 每秒刷新一次防掉落。"""
+        import rospy
+        end = rospy.Time.now().to_sec() + duration
+        while rospy.Time.now().to_sec() < end:
+            self._hold_arms()
+            rospy.sleep(min(0.8, max(0.1, end - rospy.Time.now().to_sec())))
+
+    # 关节限位
+    JOINT_LIMITS_R = {
+        # 来源: biped_v3_arm.urdf zarm_r1~r7 关节限位 (度)
+        "r_arm_pitch":  (-137, 34),
+        "r_arm_roll":   (-84,  20),
+        "r_arm_yaw":    (-26,  90),
+        "r_forearm":    (-150, 0),
+        "r_hand_yaw":   (-90,  90),
+        "r_hand_pitch": (-40,  40),
+        "r_hand_roll":  (-40,  75),
+    }
+    JOINT_LIMITS_L = {
+        # 来源: biped_v3_arm.urdf zarm_l1~l7 关节限位 (度)
+        "l_arm_pitch":  (-137, 34),
+        "l_arm_roll":   (-20,  84),
+        "l_arm_yaw":    (-90,  26),
+        "l_forearm":    (-150, 0),
+        "l_hand_yaw":   (-90,  90),
+        "l_hand_pitch": (-40,  40),
+        "l_hand_roll":  (-75,  40),
+    }
+    LIMIT_KEYS = ["arm_pitch", "arm_roll", "arm_yaw",
+                  "forearm", "hand_yaw", "hand_pitch", "hand_roll"]
+
+    def _clamp_joints(self, joints, arm):
+        limits = self.JOINT_LIMITS_R if arm == "right" else self.JOINT_LIMITS_L
+        prefix = "r_" if arm == "right" else "l_"
+        clamped = []
+        for i, key in enumerate(self.LIMIT_KEYS):
+            lo, hi = limits[prefix + key]
+            clamped.append(max(lo, min(hi, joints[i])))
+        return clamped
+
+    def _compute_arm_to_target(self, bx, by, bz, arm="right", z_offset=0.15):
+        """根据 base_link 目标计算手臂关节角。
+        z_offset: 手部参考点高于目标的高度(m), 默认0.15=15cm。
+        肩关节原点来自 URDF (biped_v3_arm):
+          zarm_r1: xyz="-0.003 -0.255 0.283" / zarm_l1: xyz="-0.003 +0.255 0.283"
+          waist_yaw_joint offset: z=0.1114  → 肩≈(0, ±0.255, 0.395)"""
+        import math
+        shoulder_z = 0.395
+        shoulder_y = -0.255 if arm == "right" else 0.255
+        target_z = bz + z_offset
+
+        dx = bx
+        dy = by - shoulder_y
+        dz = target_z - shoulder_z  # 负值 = 目标在肩下方
+        dist_xy = math.hypot(dx, dy)
+        dist_3d = math.hypot(dist_xy, dz)
+
+        # 肩部 roll：左右方向
+        if arm == "right":
+            roll = -math.degrees(math.atan2(abs(dy), max(dx, 0.01)))
+        else:
+            roll = +math.degrees(math.atan2(abs(dy), max(dx, 0.01)))
+
+        # IK: 2 连杆 (L1=上臂, L2=前臂) 在 roll 对齐平面内
+        L1, L2 = 0.32, 0.35
+        d = min(dist_3d, L1 + L2 - 0.02)
+        cos_elbow = (d**2 - L1**2 - L2**2) / (2.0 * L1 * L2)
+        cos_elbow = max(-1.0, min(1.0, cos_elbow))
+        elbow = math.degrees(math.acos(cos_elbow))
+        # shoulder pitch: 直接用 dist_xy (roll 后的平面距离)
+        beta = math.atan2(L2 * math.sin(math.radians(elbow)),
+                          L1 + L2 * math.cos(math.radians(elbow)))
+        # 两种解：pitch1 (elbow-down) 和 pitch2 (elbow-up)
+        pitch1 = math.degrees(math.atan2(dist_xy, -dz) - beta)
+        pitch2 = math.degrees(math.atan2(dist_xy, -dz) + beta)
+        # 选 pitch 在 [-137,34] 内且使肘更前伸的解
+        pitch = pitch1 if (-137 <= pitch1 <= 34) else pitch2
+        if not (-137 <= pitch <= 34):
+            pitch = pitch1  # 回退
+
+        # r_arm_pitch: 负=前伸, 正=后摆，故取反
+        # r_forearm_pitch: URDF [-150,0], 负=肘弯曲，故取反
+        joints = [round(-pitch, 1), round(roll, 1), 0.0,
+                  round(-elbow, 1), 0.0, 0.0, 0.0]
+        rospy = __import__('rospy')
+        rospy.loginfo("IK: dx=%.2f dy=%.2f dz=%.2f d=%.2f -> pitch=%.1f→%.1f roll=%.1f elbow=%.1f",
+                       dist_xy, dy, dz, d, pitch, -pitch, roll, -elbow)
+        return joints  # 原始值, 由调用方 clamp 并检测可达性
+
+    # ── 腕部相机颜色检测 + 二次校准 ─────────────────
+
+    def _detect_white_in_wrist(self, arm="right"):
+        """手腕相机检测白色物体(螺丝刀)。HSV: 低饱和度+高亮度。
+        返回 (cx, cy) 像素坐标，未检测到返回 None。"""
+        import cv2
+        cv_img = self._perception.get_wrist_cv(arm)
+        if cv_img is None:
+            return None
+        h, w = cv_img.shape[:2]
+        hsv = cv2.cvtColor(cv_img, cv2.COLOR_BGR2HSV)
+
+        lower = (0, 0, 160)
+        upper = (180, 45, 255)
+        mask = cv2.inRange(hsv, lower, upper)
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
+                                       cv2.CHAIN_APPROX_SIMPLE)
+        valid = [c for c in contours if cv2.contourArea(c) > 80]
+        if not valid:
+            return None
+        best = max(valid, key=cv2.contourArea)
+        M = cv2.moments(best)
+        if M["m00"] == 0:
+            return None
+        cx = int(M["m10"] / M["m00"])
+        cy = int(M["m01"] / M["m00"])
+
+        import rospy
+        rospy.loginfo("[腕部] 白色目标 @ (%d,%d) area=%.0f img=%dx%d",
+                      cx, cy, cv2.contourArea(best), w, h)
+        return (cx, cy)
+
+    def _detect_black_in_wrist(self, arm="right"):
+        """手腕相机检测黑色物体(pipe_clamp)。HSV: 低亮度。
+        返回 (cx, cy) 像素坐标，未检测到返回 None。"""
+        import cv2
+        cv_img = self._perception.get_wrist_cv(arm)
+        if cv_img is None:
+            return None
+        h, w = cv_img.shape[:2]
+        hsv = cv2.cvtColor(cv_img, cv2.COLOR_BGR2HSV)
+
+        lower = (0, 0, 0)
+        upper = (180, 255, 60)
+        mask = cv2.inRange(hsv, lower, upper)
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL,
+                                       cv2.CHAIN_APPROX_SIMPLE)
+        valid = [c for c in contours if cv2.contourArea(c) > 80]
+        if not valid:
+            return None
+        best = max(valid, key=cv2.contourArea)
+        M = cv2.moments(best)
+        if M["m00"] == 0:
+            return None
+        cx = int(M["m10"] / M["m00"])
+        cy = int(M["m01"] / M["m00"])
+
+        import rospy
+        rospy.loginfo("[腕部] 黑色目标 @ (%d,%d) area=%.0f img=%dx%d",
+                      cx, cy, cv2.contourArea(best), w, h)
+        return (cx, cy)
+
+    def _fine_align_wrist(self, base_joints, arm="right", max_iter=8, detector=None):
+        """根据腕部相机颜色检测微调手臂关节角。
+        detector: 颜色检测函数, 默认白色检测。
+        返回调整后的 joints list[7]（度）。"""
+        import rospy
+        if detector is None:
+            detector = self._detect_white_in_wrist
+        joints = list(base_joints)
+        for it in range(max_iter):
+            rospy.sleep(0.6)
+            center = detector(arm)
+            if center is None:
+                rospy.loginfo("[校准] 第%d次未检测到目标", it + 1)
+                continue
+
+            cx, cy = center
+            w = 1280
+            h = 720
+            err_x = cx - w // 2
+            err_y = cy - h // 2
+            rospy.loginfo("[校准 %d/%d] err_x=%d err_y=%d",
+                          it + 1, max_iter, err_x, err_y)
+
+            if abs(err_x) < 25 and abs(err_y) < 25:
+                rospy.loginfo("[校准] 已对齐")
+                break
+
+            # 水平偏移 → 调 arm_roll
+            step_x = 1.5 if abs(err_x) < 60 else 3.0
+            if err_x > 0:
+                joints[1] -= step_x   # 目标偏右 → 手臂更外摆
+            else:
+                joints[1] += step_x
+
+            # 垂直偏移 → 调 arm_pitch
+            step_y = 1.5 if abs(err_y) < 60 else 3.0
+            if err_y > 0:
+                joints[0] -= step_y   # 目标偏下 → 手臂前伸
+            else:
+                joints[0] += step_y
+
+            joints = self._clamp_joints(joints, arm)
+            self._send_arms(**{arm: joints})
+            rospy.sleep(0.8)
+
+        return joints
+
+    def _execute_pick(self, current_joints, arm="right"):
+        """从当前关节位置执行抓取: 下降 → 夹紧 → 抬起。
+        forearm URDF [-150,0]: -150=最弯(手近), 0=全伸展(手远)。
+        下降→forearm趋向0(伸展), 抬起→forearm趋向-150(弯曲)。"""
+        import rospy
+        # 下降: forearm伸展(手向下/外), arm_pitch微前伸保持手掌水平
+        lower = [
+            current_joints[0] - 5,        # arm_pitch 略前伸
+            current_joints[1],            # arm_roll 保持
+            current_joints[2],            # arm_yaw 保持
+            min(current_joints[3] + 25, 0),  # forearm 伸展(趋向0=手下降)
+            current_joints[4],            # hand_yaw 保持
+            current_joints[5],            # hand_pitch 保持(掌心向下)
+            current_joints[6],            # hand_roll 保持
+        ]
+        clamped_lower = self._clamp_joints(lower, arm)
+        rospy.loginfo("[抓取] 下降: %s", clamped_lower)
+        self._send_arms(**{arm: clamped_lower})
+        self._sleep_hold(2.0)
+
+        # 夹紧
+        self._robot.control_gripper(70, arm)
+        rospy.sleep(0.6)
+        rospy.loginfo("[抓取] 夹爪闭合")
+
+        # 抬起: forearm弯曲(手靠近身体), arm后收内收
+        lift = [
+            current_joints[0] + 15,       # arm_pitch 后收
+            current_joints[1] - 15,       # arm_roll 内收
+            current_joints[2],
+            current_joints[3] - 25,       # forearm 弯曲(趋向-150=手抬起)
+            current_joints[4],            # hand_yaw 保持
+            current_joints[5],            # hand_pitch 保持
+            current_joints[6],            # hand_roll 保持
+        ]
+        clamped_lift = self._clamp_joints(lift, arm)
+        rospy.loginfo("[抓取] 抬起: %s", clamped_lift)
+        self._send_arms(**{arm: clamped_lift})
+        self._sleep_hold(2.0)
+
+    # ═══════════════════════════════════════════════════════
+    # 主流程: 检测 → 校准 → 抓取 → 放箱
+    # ═══════════════════════════════════════════════════════
 
     def run(self):
         import rospy
-        import cv2
+        import math
         rospy.loginfo("=== 场景二：零件分拣归档（seed=%d） ===", self._seed)
+
+        # ═══ Phase 1: 初始化 — 低头+双臂45°侧举 ═══
         self._robot.look_at(pitch=+20.0, yaw=0.0)
+        self._robot.switch_arm_control_mode(2)
+        rospy.sleep(0.5)
 
+        pregrasp_left  = [0.0, 45.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        pregrasp_right = [0.0, -45.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        self._send_arms(left=pregrasp_left, right=pregrasp_right)
+        self._sleep_hold(1.0)
+        rospy.loginfo("[初始化] 双臂45°侧举")
 
+        rospy.loginfo("等待头部到位...")
+        self._perception.wait_for_head_pitch(+20.0)
 
-    def _detect_and_pick(self):
-        # TODO: 识别零件类别
-        self._nav.move_to(0.5, 0.0)
-        self._manip.pick("right")
+        rospy.loginfo("等待相机数据就绪...")
+        if not self._perception.wait_for_data():
+            rospy.logerr("相机数据未就绪，退出")
+            return
 
-    def _sort_and_place(self):
-        # TODO: 根据类别导航到对应区域
-        self._nav.move_to(0.0, 0.3)
-        self._manip.place("right")
+        self._robot.switch_arm_control_mode(2)
+        rospy.sleep(0.3)
+        self._send_arms(left=pregrasp_left, right=pregrasp_right)
+        rospy.sleep(0.5)
+        rospy.loginfo("[初始化] 手臂模式重锁")
 
+        # ═══ Phase 2-3: 循环处理每个零件类别 ═══
+        TARGET_CLASSES = ["pipe_clamp", "pipe_fitting", "screwdriver"]
+        for target_class in TARGET_CLASSES:
+            rospy.loginfo("开始检测 %s ...", target_class)
+            self._sleep_hold(0.5)
+
+            objects = self._perception.get_objects_3d_yolo()
+            objects_3d = [o for o in (objects or [])
+                          if "position_base" in o and o["confidence"] >= 0.5
+                          and o["class_name"] == target_class
+                          and abs(o["position_base"][0]) < 2.0]
+
+            if not objects_3d:
+                rospy.logerr("未检测到 %s，跳过", target_class)
+                continue
+
+            # 选最左侧的 (Y最大)
+            objects_3d.sort(key=lambda o: o["position_base"][1], reverse=True)
+            best = objects_3d[0]
+
+            rospy.loginfo("目标: %s conf=%.3f  base=(%.3f,%.3f,%.3f)",
+                          best["class_name"], best["confidence"],
+                          best["position_base"][0],
+                          best["position_base"][1],
+                          best["position_base"][2])
+
+            # ═══ 收敛采集 — 连续2帧稳定(数=6,差<3cm)即平均 ═══
+            self._sleep_hold(1.0)
+            rospy.loginfo("收敛采集: 等待连续2帧稳定...")
+            prev_x = prev_y = prev_z = None
+            prev_count = 0
+            bx = by = bz = 0.0
+            max_frames = 30
+            for frame_i in range(max_frames):
+                self._hold_arms()
+                rospy.sleep(0.4)
+                objs = self._perception.get_objects_3d_yolo()
+                class_objs = [o for o in (objs or [])
+                             if o.get("class_name") == target_class
+                             and "position_base" in o
+                             and o["confidence"] >= 0.5]
+                total_objs = len([o for o in (objs or [])
+                                  if "position_base" in o and o["confidence"] >= 0.5])
+                if not class_objs:
+                    continue
+                class_objs.sort(key=lambda o: o["position_base"][1], reverse=True)
+                cur = class_objs[0]["position_base"]
+                cur_x, cur_y, cur_z = cur[0], cur[1], cur[2]
+                dist = 999 if prev_x is None else math.hypot(cur_x - prev_x, cur_y - prev_y)
+
+                rospy.loginfo("[收敛 %d/%d] 总数=%d %s=(%.3f,%.3f,%.3f) "
+                              "Δpos=%.3f prev_cnt=%d",
+                              frame_i + 1, max_frames,
+                              total_objs, target_class, cur_x, cur_y, cur_z,
+                              dist, prev_count)
+
+                if (prev_x is not None and total_objs == 6 and prev_count == 6
+                        and dist < 0.03):
+                    bx = (cur_x + prev_x) / 2.0
+                    by = (cur_y + prev_y) / 2.0
+                    bz = (cur_z + prev_z) / 2.0
+                    rospy.loginfo("→ 收敛! 2帧平均: (%.3f, %.3f, %.3f)", bx, by, bz)
+                    break
+
+                prev_x, prev_y, prev_z = cur_x, cur_y, cur_z
+                prev_count = total_objs
+            else:
+                if prev_x is not None:
+                    bx, by, bz = prev_x, prev_y, prev_z
+                    rospy.logwarn("未收敛, 用最后帧: (%.3f, %.3f, %.3f)", bx, by, bz)
+                else:
+                    rospy.logerr("无有效 %s 坐标", target_class)
+                    continue
+
+            # ═══ 抓取 — 抬臂避障 → 放到物体后7cm → 夹紧 ═══
+            self._sleep_hold(1.0)
+            arm = "left" if by > 0 else "right"
+            rospy.loginfo("目标 Y=%.3f → 选%s臂", by, arm)
+
+            raw = self._compute_arm_to_target(bx, by, bz, arm)
+            clamped = self._clamp_joints(raw, arm)
+            any_clamped = any(abs(a - b) > 0.5 for a, b in zip(raw, clamped))
+            if any_clamped:
+                fallback = "right" if arm == "left" else "left"
+                rospy.loginfo("%s臂不可达, 切换%s臂", arm, fallback)
+                arm = fallback
+                raw = self._compute_arm_to_target(bx, by, bz, arm)
+                clamped = self._clamp_joints(raw, arm)
+                if any(abs(a - b) > 0.5 for a, b in zip(raw, clamped)):
+                    rospy.logerr("双臂均不可达!")
+                    continue
+
+            sign = 1 if arm == "left" else -1
+            transit = [
+                clamped[0],
+                sign * max(abs(clamped[1]) + 20, 50),
+                clamped[2],
+                max(clamped[3] - 30, -100),
+                clamped[4], clamped[5], clamped[6],
+            ]
+            transit = self._clamp_joints(transit, arm)
+            rospy.loginfo("[Transit] %s臂 抬臂避障: %s", arm, transit)
+            self._send_arms(**{arm: transit})
+            self._sleep_hold(1.0)
+
+            reach_raw = self._compute_arm_to_target(bx - 0.07, by, bz, arm, z_offset=0.0)
+            reach = self._clamp_joints(reach_raw, arm)
+            reach = self._clamp_joints(reach, arm)
+            rospy.loginfo("[Reach] %s臂 直放物体后7cm: %s", arm, reach)
+
+            mid = [
+                transit[i] + (reach[i] - transit[i]) * 0.5
+                for i in range(7)
+            ]
+            mid = self._clamp_joints(mid, arm)
+            self._send_arms(**{arm: mid})
+            rospy.sleep(0.8)
+            self._send_arms(**{arm: reach})
+            self._sleep_hold(2.0)
+
+            self._robot.control_gripper(70, arm)
+            rospy.sleep(0.6)
+            rospy.loginfo("[Grasp] %s臂 夹爪闭合 %s", arm, target_class)
+
+        # ═══ Phase 4+: 暂不执行, 直接进入可视化 ═══
+        self._exit_after_run = False
+        rospy.loginfo("[暂停] Phase4-6 暂不运行, 进入可视化保持, Ctrl-C退出")
+        rate = rospy.Rate(2)
+        while not rospy.is_shutdown():
+            self._perception.get_objects_3d_yolo()
+            self._perception.republish_viz()
+            rate.sleep()
+
+        # ---- 以下暂不执行 ----
+        if False:
+            # ═══ Phase 4: 腕部相机精调 (黑色检测) ═══
+            self._sleep_hold(3.0)
+            rospy.loginfo("[精调] 开始腕部相机黑色检测校准...")
+            refined_joints = self._fine_align_wrist(clamped, arm,
+                                                    detector=self._detect_black_in_wrist)
+
+            # ═══ Phase 5: 抓取 ═══
+            self._sleep_hold(3.0)
+            rospy.loginfo("[抓取] 执行抓取动作")
+            self._execute_pick(refined_joints, arm)
+
+            # ═══ Phase 6: 移动到目标箱 → 放置 ═══
+            self._sleep_hold(3.0)
+            bin_x, bin_y = self.BIN_POSITIONS["blue_bin"]
+            bin_z = 0.05
+            rospy.loginfo("[放箱] 目标: blue_bin (%.2f, %.2f)", bin_x, bin_y)
+
+            bin_raw = self._compute_arm_to_target(bin_x, bin_y, bin_z, arm)
+            bin_clamped = self._clamp_joints(bin_raw, arm)
+            rospy.loginfo("[放箱] %s臂 → bin上方: %s", arm, bin_clamped)
+            self._send_arms(**{arm: bin_clamped})
+            self._sleep_hold(3.0)
+
+            lower_bin = [
+                bin_clamped[0] - 5,
+                bin_clamped[1],
+                bin_clamped[2],
+                min(bin_clamped[3] + 20, 0),
+                0, 0, 0,
+            ]
+            lower_bin_clamped = self._clamp_joints(lower_bin, arm)
+            rospy.loginfo("[放箱] 放入: %s", lower_bin_clamped)
+            self._send_arms(**{arm: lower_bin_clamped})
+            self._sleep_hold(3.0)
+
+            self._robot.control_gripper(0, arm)
+            rospy.sleep(0.5)
+            rospy.loginfo("[放箱] 释放完成")
+
+            home_right = [0, -30, 0, -30, 0, 0, 0]
+            home_left  = [0,  30, 0, -30, 0, 0, 0]
+            home = home_left if arm == "left" else home_right
+            self._send_arms(**{arm: home})
+            self._sleep_hold(2.0)
+            rospy.loginfo("[完成] pipe_clamp 已放入蓝色箱")
 
 class Scene3Controller:
     """场景三：SMT 料盘出库。"""
@@ -780,9 +1724,8 @@ class Scene3Controller:
         self._nav.move_to(0.0, -0.4)
         self._manip.place("right")
 
-
 def run_scene(scene, seed, node_name=None, timeout=120,
-              time_limit=None, timer_gui=True):
+time_limit=None, timer_gui=True):
     if scene not in SCENE_CONFIGS:
         raise ValueError("unknown scene: {}".format(scene))
 
@@ -833,32 +1776,30 @@ def run_scene(scene, seed, node_name=None, timeout=120,
         perception.republish_viz()
         rate.sleep()
 
-
 def main():
     parser = argparse.ArgumentParser(description="挑战杯三场景统一任务入口")
     parser.add_argument("--scene", choices=sorted(SCENE_CONFIGS), default="scene1",
-                        help="要启动的比赛场景")
+    help="要启动的比赛场景")
     parser.add_argument("--seed", type=int, default=0,
-                        help="场景种子；正式评测 seed 由组委会指定")
+    help="场景种子；正式评测 seed 由组委会指定")
     parser.add_argument("--node-name", default=None,
-                        help="ROS 节点名；默认按 scene 自动设置")
+    help="ROS 节点名；默认按 scene 自动设置")
     parser.add_argument("--timeout", type=int, default=120,
-                        help="等待仿真就绪的超时时间，单位秒")
+    help="等待仿真就绪的超时时间，单位秒")
     parser.add_argument("--time-limit", type=float, default=None,
-                        help="比赛时长，单位秒；默认读取 CHALLENGE_TIME_LIMIT，未设置则不限时")
+    help="比赛时长，单位秒；默认读取 CHALLENGE_TIME_LIMIT，未设置则不限时")
     parser.add_argument("--no-timer-gui", action="store_true",
-                        help="不弹出计时器窗口，仅保留后台计时日志")
+    help="不弹出计时器窗口，仅保留后台计时日志")
     args = parser.parse_args()
 
     run_scene(
-        scene=args.scene,
-        seed=args.seed,
-        node_name=args.node_name,
-        timeout=args.timeout,
-        time_limit=args.time_limit,
-        timer_gui=not args.no_timer_gui,
+    scene=args.scene,
+    seed=args.seed,
+    node_name=args.node_name,
+    timeout=args.timeout,
+    time_limit=args.time_limit,
+    timer_gui=not args.no_timer_gui,
     )
-
 
 if __name__ == "__main__":
     main()
