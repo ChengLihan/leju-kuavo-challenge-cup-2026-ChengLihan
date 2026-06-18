@@ -1,7 +1,7 @@
 # kuavo_learning_studio 使用说明
 
-`collect_scene2_dataset` 包含比赛任务二的数据采集脚本，详细使用说明看路径内readme。
-场景一数据采集脚本和数据集敬请期待
+`collect_scene1_dataset` 包含比赛任务一（快递分拣交接）的数据采集脚本，详细使用说明看路径内 README。
+`collect_scene2_dataset` 包含比赛任务二的数据采集脚本，详细使用说明看路径内 README。
 
 kuavo_learning_studio具体使用说明请进入kuavo_learning_studio 文档网站查看。
 

@@ -12,7 +12,6 @@ catkin_install_python(PROGRAMS
   scripts/leju_claw_keyboard.py
   scripts/sim_leju_claw_interface.py
   scripts/sim_timer.py
-  test/collect_scene2_dataset.py
   utils/lidar_mid360_node.py
   utils/scene_builder.py
   utils/challenge_sim_launcher.py
