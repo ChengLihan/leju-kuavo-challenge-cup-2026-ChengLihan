@@ -77,3 +77,19 @@ src/challenge_cup_simulator/models/biped_s52/xml/_scene_*.xml
 # challenge_secret 机密源码：选手分发仓库不提交，仅分发编译后的
 # challenge_cup_simulator/lib/challenge_secret*.so（组委会单独保存源码）
 src/challenge_secret/
+
+# crash dump
+core
+core.*
+*.core
+
+# local heavy files
+runs/
+datasets/
+.venv*/
+yolo_gpu/
+*.pt
+*.onnx
+*.engine
+*.cache
+*.whl
