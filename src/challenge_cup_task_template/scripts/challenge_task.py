@@ -1210,13 +1210,22 @@ class Scene2Controller:
         "right": [-0.081987, -0.152343, 0.857876, 0.483858],
         "left":  [-0.081987,  0.152343, 0.857876, -0.483858],
     }
-    GRASP_APPROACH_CLEARANCE = 0.10
+    GRASP_APPROACH_CLEARANCE = -0.02
     GRASP_DESCEND_CLEARANCE = 0.015
+    TABLE_GUARD_CLEARANCE = 0.20
+    TABLE_EE_MIN_CLEARANCE = 0.08
     IK_MODE_POS_HARD_ORI_SOFT = 0x02
     IK_MODE_THREE_POINT_MIXED = 0x06
     IK_TIMEOUT = 0.8
     FK_POSITION_WARN = 0.04
     DOWN_AXIS_WARN_DEG = 25.0
+    GRASP_TF_ORIENTATION_TOL_DEG = 10.0
+    GRASP_TF_MAX_CHECKS = 5
+    GRASP_BACK_OFFSET_PER_DEG = 0.001
+    GRASP_BACK_OFFSET_MAX = 0.04
+    GRASP_SETTLE_AFTER_COMPENSATION = 1.0
+    PLACE_GUARD_Z = 0.26
+    PLACE_RELEASE_Z = 0.16
 
     def __init__(self, robot, perception, navigation, manipulation, seed=0):
         self._robot = robot
@@ -1250,6 +1259,22 @@ class Scene2Controller:
         while rospy.Time.now().to_sec() < end:
             self._hold_arms()
             rospy.sleep(min(0.8, max(0.1, end - rospy.Time.now().to_sec())))
+
+    def _move_arm_slow(self, arm, target_joints, duration=2.0, steps=12):
+        """对单臂做线性插值，减少抓取后抬起和放箱时的冲击。"""
+        import rospy
+        start = list(self._last_left if arm == "left" else self._last_right)
+        target = list(target_joints)
+        steps = max(1, int(steps))
+        dt = float(duration) / float(steps)
+        for i in range(1, steps + 1):
+            alpha = float(i) / float(steps)
+            point = [
+                start[j] + (target[j] - start[j]) * alpha
+                for j in range(7)
+            ]
+            self._send_arms(**{arm: point})
+            rospy.sleep(dt)
 
     # 关节限位
     JOINT_LIMITS_R = {
@@ -1395,6 +1420,10 @@ class Scene2Controller:
         dot = max(-1.0, min(1.0, abs(dot)))
         return 2.0 * math.acos(dot)
 
+    def _table_safe_z(self, object_z, clearance):
+        """用物体高度近似桌面参考，非抓取阶段保持末端离桌面足够高。"""
+        return float(object_z + max(clearance, self.TABLE_EE_MIN_CLEARANCE))
+
     def _quat_to_matrix(self, quat_xyzw):
         q = np.array(quat_xyzw, dtype=np.float64)
         n = np.linalg.norm(q)
@@ -1503,6 +1532,11 @@ class Scene2Controller:
 
     def _plan_top_down_grasp(self, bx, by, bz, arm):
         target_quat = self._target_quat_for_arm(arm)
+        guard_xyz = [
+            float(bx),
+            float(by),
+            self._table_safe_z(bz, self.TABLE_GUARD_CLEARANCE),
+        ]
         approach_xyz = [
             float(bx),
             float(by),
@@ -1514,11 +1548,19 @@ class Scene2Controller:
             float(bz + self.GRASP_DESCEND_CLEARANCE),
         ]
 
-        approach = self._solve_top_down_ik(
-            arm, approach_xyz, target_quat,
+        guard = self._solve_top_down_ik(
+            arm, guard_xyz, target_quat,
             constraint_mode=self.IK_MODE_THREE_POINT_MIXED,
             pos_cost_weight=2.0,
         )
+        approach = None
+        if guard is not None:
+            approach = self._solve_top_down_ik(
+                arm, approach_xyz, target_quat,
+                seed_q14=guard[1],
+                constraint_mode=self.IK_MODE_THREE_POINT_MIXED,
+                pos_cost_weight=2.0,
+            )
         grasp = None
         if approach is not None:
             grasp = self._solve_top_down_ik(
@@ -1528,18 +1570,23 @@ class Scene2Controller:
                 pos_cost_weight=2.0,
             )
 
-        if approach is not None and grasp is not None:
+        if guard is not None and approach is not None and grasp is not None:
+            guard_joints, guard_q14 = guard
             approach_joints, approach_q14 = approach
             grasp_joints, grasp_q14 = grasp
+            self._verify_fk_plan(arm, guard_q14, guard_xyz,
+                                 target_quat, "guard", table_z_ref=bz)
             self._verify_fk_plan(arm, approach_q14, approach_xyz,
-                                 target_quat, "approach")
+                                 target_quat, "approach", table_z_ref=bz)
             self._verify_fk_plan(arm, grasp_q14, grasp_xyz,
                                  target_quat, "grasp")
             return {
                 "arm": arm,
+                "guard_xyz": guard_xyz,
                 "approach_xyz": approach_xyz,
                 "grasp_xyz": grasp_xyz,
                 "target_quat": target_quat,
+                "guard_joints": guard_joints,
                 "approach_joints": approach_joints,
                 "grasp_joints": grasp_joints,
                 "used_ik": True,
@@ -1549,15 +1596,18 @@ class Scene2Controller:
         rospy.logwarn("Top-down IK不可用，使用几何IK回退规划")
         return {
             "arm": arm,
+            "guard_xyz": guard_xyz,
             "approach_xyz": approach_xyz,
             "grasp_xyz": grasp_xyz,
             "target_quat": target_quat,
+            "guard_joints": self._fallback_top_down_joints(guard_xyz, arm),
             "approach_joints": self._fallback_top_down_joints(approach_xyz, arm),
             "grasp_joints": self._fallback_top_down_joints(grasp_xyz, arm),
             "used_ik": False,
         }
 
-    def _verify_fk_plan(self, arm, q14_rad, target_xyz, target_quat, label):
+    def _verify_fk_plan(self, arm, q14_rad, target_xyz, target_quat, label,
+                        table_z_ref=None):
         import math
         import rospy
         fk = self._call_fk(q14_rad, timeout=self.IK_TIMEOUT)
@@ -1578,8 +1628,16 @@ class Scene2Controller:
         if pos_err > self.FK_POSITION_WARN:
             rospy.logwarn("[FK校验:%s/%s] 末端位置误差偏大: %.3fm",
                           arm, label, pos_err)
+        if table_z_ref is not None:
+            margin = float(actual[2] - table_z_ref)
+            rospy.loginfo("[桌面安全:%s/%s] ee_z_margin=%.3fm",
+                          arm, label, margin)
+            if margin < self.TABLE_EE_MIN_CLEARANCE:
+                rospy.logwarn("[桌面安全:%s/%s] 末端离桌面参考过近: %.3fm",
+                              arm, label, margin)
 
-    def _verify_tf_pose(self, arm, target_xyz, target_quat, label):
+    def _verify_tf_pose(self, arm, target_xyz, target_quat, label,
+                        table_z_ref=None):
         """用当前 TF 树检查实际末端 frame，验证 URDF/TF 下的落点和朝向。"""
         import math
         import rospy
@@ -1601,12 +1659,182 @@ class Scene2Controller:
                 "%.1f°" % math.degrees(quat_err) if quat_err is not None else "n/a",
                 "%.1f°" % math.degrees(down_err) if down_err is not None else "n/a",
                 actual_xyz[0], actual_xyz[1], actual_xyz[2])
-            if down_err is not None and math.degrees(down_err) > self.DOWN_AXIS_WARN_DEG:
+            quat_err_deg = math.degrees(quat_err) if quat_err is not None else None
+            down_err_deg = math.degrees(down_err) if down_err is not None else None
+            if down_err_deg is not None and down_err_deg > self.DOWN_AXIS_WARN_DEG:
                 rospy.logwarn("[TF校验:%s/%s] 夹爪朝下角度偏差 %.1f°",
-                              arm, label, math.degrees(down_err))
+                              arm, label, down_err_deg)
+            if table_z_ref is not None:
+                margin = float(actual_xyz[2] - table_z_ref)
+                rospy.loginfo("[桌面安全TF:%s/%s] ee_z_margin=%.3fm",
+                              arm, label, margin)
+                if margin < self.TABLE_EE_MIN_CLEARANCE:
+                    rospy.logwarn("[桌面安全TF:%s/%s] 末端离桌面参考过近: %.3fm",
+                                  arm, label, margin)
+            return {
+                "pos_err": pos_err,
+                "quat_err_deg": quat_err_deg,
+                "down_err_deg": down_err_deg,
+                "actual_xyz": actual_xyz.tolist(),
+                "actual_quat": actual_quat,
+            }
         except Exception as e:
             rospy.logwarn_throttle(5.0, "TF校验失败 %s -> base_link: %s",
                                    frame, e)
+            return None
+
+    def _wait_for_grasp_tf_ready(self, arm, plan):
+        """闭爪前最多5轮TF检查；超限后按角度误差后移补偿并继续抓取。"""
+        import rospy
+        tol = self.GRASP_TF_ORIENTATION_TOL_DEG
+        last_err = None
+        for check_i in range(1, self.GRASP_TF_MAX_CHECKS + 1):
+            if rospy.is_shutdown():
+                return False
+            self._send_arms(**{arm: plan["grasp_joints"]})
+            result = self._verify_tf_pose(
+                arm, plan["grasp_xyz"], plan["target_quat"],
+                "grasp_wait_%d" % check_i)
+            if result is not None and result.get("quat_err_deg") is not None:
+                err = result["quat_err_deg"]
+                last_err = err
+                if err <= tol:
+                    rospy.loginfo("[GraspReady] %s臂 TF姿态误差 %.1f° <= %.1f°，开始抓取",
+                                  arm, err, tol)
+                    return True
+                rospy.loginfo("[GraspWait %d/%d] %s臂 TF姿态误差 %.1f° > %.1f°",
+                              check_i, self.GRASP_TF_MAX_CHECKS,
+                              arm, err, tol)
+            self._sleep_hold(0.4)
+
+        if last_err is not None:
+            self._compensate_grasp_backward(arm, plan, last_err)
+        else:
+            rospy.logwarn("[GraspWait] %s臂 5轮内没有有效TF角度，保持当前抓取位姿", arm)
+
+        self._send_arms(**{arm: plan["grasp_joints"]})
+        self._sleep_hold(self.GRASP_SETTLE_AFTER_COMPENSATION)
+        self._verify_tf_pose(arm, plan["grasp_xyz"],
+                             plan["target_quat"], "grasp_compensated")
+        rospy.loginfo("[GraspReady] %s臂 5轮TF检查结束，等待稳定后继续抓取", arm)
+        return True
+
+    def _compensate_grasp_backward(self, arm, plan, quat_err_deg):
+        """姿态误差越大，抓取点沿base_link -X方向轻微后移。"""
+        import rospy
+        excess = max(0.0, float(quat_err_deg) - self.GRASP_TF_ORIENTATION_TOL_DEG)
+        offset = min(self.GRASP_BACK_OFFSET_MAX,
+                     excess * self.GRASP_BACK_OFFSET_PER_DEG)
+        if offset <= 1e-4:
+            rospy.loginfo("[GraspComp] %s臂 姿态误差%.1f°，无需后移补偿",
+                          arm, quat_err_deg)
+            return
+
+        new_xyz = list(plan["grasp_xyz"])
+        new_xyz[0] -= offset
+        solved = self._solve_top_down_ik(
+            arm, new_xyz, plan["target_quat"],
+            constraint_mode=self.IK_MODE_THREE_POINT_MIXED,
+            pos_cost_weight=2.0,
+        )
+        if solved is not None:
+            new_joints, _q14 = solved
+        else:
+            new_joints = self._fallback_top_down_joints(new_xyz, arm)
+
+        plan["grasp_xyz"] = new_xyz
+        plan["grasp_joints"] = new_joints
+        rospy.loginfo("[GraspComp] %s臂 姿态误差%.1f°，抓取点向后补偿 %.3fm -> (%.3f,%.3f,%.3f)",
+                      arm, quat_err_deg, offset,
+                      new_xyz[0], new_xyz[1], new_xyz[2])
+
+    def _plan_bin_place(self, target_class, arm):
+        """为已抓取物体规划箱子上方和箱内释放点。"""
+        import rospy
+        bin_name = self.BIN_MAP.get(target_class)
+        if bin_name is None or bin_name not in self.BIN_POSITIONS:
+            rospy.logwarn("[放箱] 未知类别/箱子: %s", target_class)
+            return None
+
+        bin_x, bin_y = self.BIN_POSITIONS[bin_name]
+        target_quat = self._target_quat_for_arm(arm)
+        guard_xyz = [float(bin_x), float(bin_y), self.PLACE_GUARD_Z]
+        release_xyz = [float(bin_x), float(bin_y), self.PLACE_RELEASE_Z]
+
+        guard = self._solve_top_down_ik(
+            arm, guard_xyz, target_quat,
+            constraint_mode=self.IK_MODE_POS_HARD_ORI_SOFT,
+            pos_cost_weight=0.0,
+        )
+        release = None
+        if guard is not None:
+            release = self._solve_top_down_ik(
+                arm, release_xyz, target_quat,
+                seed_q14=guard[1],
+                constraint_mode=self.IK_MODE_POS_HARD_ORI_SOFT,
+                pos_cost_weight=0.0,
+            )
+
+        if guard is not None and release is not None:
+            guard_joints, guard_q14 = guard
+            release_joints, release_q14 = release
+            self._verify_fk_plan(arm, guard_q14, guard_xyz,
+                                 target_quat, "place_guard")
+            self._verify_fk_plan(arm, release_q14, release_xyz,
+                                 target_quat, "place_release")
+            return {
+                "bin_name": bin_name,
+                "guard_xyz": guard_xyz,
+                "release_xyz": release_xyz,
+                "target_quat": target_quat,
+                "guard_joints": guard_joints,
+                "release_joints": release_joints,
+                "used_ik": True,
+            }
+
+        rospy.logwarn("[放箱] IK不可用，使用几何IK回退放置")
+        return {
+            "bin_name": bin_name,
+            "guard_xyz": guard_xyz,
+            "release_xyz": release_xyz,
+            "target_quat": target_quat,
+            "guard_joints": self._fallback_top_down_joints(guard_xyz, arm),
+            "release_joints": self._fallback_top_down_joints(release_xyz, arm),
+            "used_ik": False,
+        }
+
+    def _place_object_in_bin(self, target_class, arm):
+        import rospy
+        place = self._plan_bin_place(target_class, arm)
+        if place is None:
+            return False
+
+        rospy.loginfo("[放箱] %s -> %s guard=(%.3f,%.3f,%.3f) release=(%.3f,%.3f,%.3f) ik=%s",
+                      target_class, place["bin_name"],
+                      place["guard_xyz"][0], place["guard_xyz"][1], place["guard_xyz"][2],
+                      place["release_xyz"][0], place["release_xyz"][1], place["release_xyz"][2],
+                      place["used_ik"])
+
+        rospy.loginfo("[PlaceGuard] %s臂 慢速移动到箱子上方", arm)
+        self._move_arm_slow(arm, place["guard_joints"], duration=2.5, steps=15)
+        self._sleep_hold(0.4)
+        self._verify_tf_pose(arm, place["guard_xyz"],
+                             place["target_quat"], "place_guard")
+
+        rospy.loginfo("[PlaceRelease] %s臂 慢速下放到箱内释放点", arm)
+        self._move_arm_slow(arm, place["release_joints"], duration=2.0, steps=12)
+        self._sleep_hold(0.5)
+        self._verify_tf_pose(arm, place["release_xyz"],
+                             place["target_quat"], "place_release")
+
+        self._robot.control_gripper(0, arm)
+        rospy.sleep(0.8)
+        rospy.loginfo("[PlaceRelease] %s臂 已打开夹爪释放", arm)
+
+        rospy.loginfo("[PlaceRetreat] %s臂 慢速退回箱子上方", arm)
+        self._move_arm_slow(arm, place["guard_joints"], duration=1.5, steps=10)
+        self._sleep_hold(0.4)
+        return True
 
     # ── 腕部相机颜色检测 + 二次校准 ─────────────────
 
@@ -1802,7 +2030,7 @@ class Scene2Controller:
         rospy.loginfo("[初始化] 手臂模式重锁")
 
         # ═══ Phase 2-3: 循环处理每个零件类别 ═══
-        TARGET_CLASSES = ["pipe_clamp", "pipe_fitting", "screwdriver"]
+        TARGET_CLASSES = ["pipe_fitting"]
         for target_class in TARGET_CLASSES:
             rospy.loginfo("开始检测 %s ...", target_class)
             self._sleep_hold(0.5)
@@ -1890,9 +2118,12 @@ class Scene2Controller:
                     rospy.logerr("双臂均无法生成top-down抓取规划!")
                     continue
 
-            rospy.loginfo("[TopDown] %s臂 approach=(%.3f,%.3f,%.3f) "
-                          "grasp=(%.3f,%.3f,%.3f) ik=%s",
+            rospy.loginfo("[TopDown] %s臂 guard=(%.3f,%.3f,%.3f) "
+                          "approach=(%.3f,%.3f,%.3f) grasp=(%.3f,%.3f,%.3f) ik=%s",
                           arm,
+                          plan["guard_xyz"][0],
+                          plan["guard_xyz"][1],
+                          plan["guard_xyz"][2],
                           plan["approach_xyz"][0],
                           plan["approach_xyz"][1],
                           plan["approach_xyz"][2],
@@ -1904,12 +2135,21 @@ class Scene2Controller:
             self._robot.control_gripper(0, arm)
             rospy.sleep(0.2)
 
+            rospy.loginfo("[Guard] %s臂 桌面避障高位: %s",
+                          arm, [round(v, 1) for v in plan["guard_joints"]])
+            self._send_arms(**{arm: plan["guard_joints"]})
+            self._sleep_hold(1.2)
+            self._verify_tf_pose(arm, plan["guard_xyz"],
+                                 plan["target_quat"], "guard",
+                                 table_z_ref=bz)
+
             rospy.loginfo("[Approach] %s臂 夹爪正上方: %s",
                           arm, [round(v, 1) for v in plan["approach_joints"]])
             self._send_arms(**{arm: plan["approach_joints"]})
             self._sleep_hold(1.5)
             self._verify_tf_pose(arm, plan["approach_xyz"],
-                                 plan["target_quat"], "approach")
+                                 plan["target_quat"], "approach",
+                                 table_z_ref=bz)
 
             rospy.loginfo("[Descend] %s臂 垂直下探抓取点: %s",
                           arm, [round(v, 1) for v in plan["grasp_joints"]])
@@ -1918,13 +2158,31 @@ class Scene2Controller:
             self._verify_tf_pose(arm, plan["grasp_xyz"],
                                  plan["target_quat"], "grasp")
 
+            rospy.loginfo("[DescendRepeat] %s臂 重复确认夹爪到物体方位", arm)
+            self._send_arms(**{arm: plan["grasp_joints"]})
+            self._sleep_hold(0.6)
+            self._verify_tf_pose(arm, plan["grasp_xyz"],
+                                 plan["target_quat"], "grasp_repeat")
+
+            if not self._wait_for_grasp_tf_ready(arm, plan):
+                rospy.logwarn("[Grasp] %s臂 TF姿态未满足10°要求，跳过闭爪", arm)
+                continue
+
             self._robot.control_gripper(70, arm)
             rospy.sleep(0.6)
             rospy.loginfo("[Grasp] %s臂 夹爪闭合 %s", arm, target_class)
 
-            rospy.loginfo("[Lift] %s臂 沿朝下姿态抬回正上方", arm)
-            self._send_arms(**{arm: plan["approach_joints"]})
-            self._sleep_hold(0.8)
+            rospy.loginfo("[LiftSlow] %s臂 缓慢抬回物体正上方", arm)
+            self._move_arm_slow(arm, plan["approach_joints"],
+                                duration=2.0, steps=12)
+            self._sleep_hold(0.4)
+
+            rospy.loginfo("[RetreatSlow] %s臂 缓慢退回桌面避障高位", arm)
+            self._move_arm_slow(arm, plan["guard_joints"],
+                                duration=1.5, steps=10)
+            self._sleep_hold(0.4)
+
+            self._place_object_in_bin(target_class, arm)
 
         # ═══ Phase 4+: 暂不执行, 直接进入可视化 ═══
         self._exit_after_run = False
