@@ -1204,6 +1204,20 @@ class Scene2Controller:
         "orange_bin":  (0.45,  0.25),
     }
 
+    # 从上往下抓取：末端局部 -Z 轴接近 base_link 的 -Z 方向。
+    # 右手姿态来自 scene2 固定抓取数据；左手为其左右镜像。
+    TOP_DOWN_QUAT = {
+        "right": [-0.081987, -0.152343, 0.857876, 0.483858],
+        "left":  [-0.081987,  0.152343, 0.857876, -0.483858],
+    }
+    GRASP_APPROACH_CLEARANCE = 0.10
+    GRASP_DESCEND_CLEARANCE = 0.015
+    IK_MODE_POS_HARD_ORI_SOFT = 0x02
+    IK_MODE_THREE_POINT_MIXED = 0x06
+    IK_TIMEOUT = 0.8
+    FK_POSITION_WARN = 0.04
+    DOWN_AXIS_WARN_DEG = 25.0
+
     def __init__(self, robot, perception, navigation, manipulation, seed=0):
         self._robot = robot
         self._perception = perception
@@ -1318,6 +1332,281 @@ class Scene2Controller:
         rospy.loginfo("IK: dx=%.2f dy=%.2f dz=%.2f d=%.2f -> pitch=%.1f→%.1f roll=%.1f elbow=%.1f",
                        dist_xy, dy, dz, d, pitch, -pitch, roll, -elbow)
         return joints  # 原始值, 由调用方 clamp 并检测可达性
+
+    def _target_quat_for_arm(self, arm):
+        quat = list(self.TOP_DOWN_QUAT[arm])
+        norm = float(np.linalg.norm(quat))
+        if norm > 1e-8:
+            quat = [v / norm for v in quat]
+        return quat
+
+    def _current_arm_joints_rad(self, timeout=0.2):
+        """读取当前双臂 14 维关节(rad)，失败则使用本控制器记录的 last joints。"""
+        import math
+        import rospy
+        try:
+            from kuavo_msgs.msg import sensorsData
+            msg = rospy.wait_for_message("/sensors_data_raw",
+                                         sensorsData,
+                                         timeout=timeout)
+            q = list(msg.joint_data.joint_q)
+            if len(q) >= 27:
+                return q[13:27]
+            if len(q) >= 26:
+                return q[12:26]
+        except Exception as e:
+            rospy.logwarn_throttle(5.0,
+                                   "读取当前手臂关节失败，使用last joints: %s", e)
+        return [math.radians(v) for v in (self._last_left + self._last_right)]
+
+    def _make_ik_param(self, constraint_mode, pos_cost_weight):
+        from kuavo_msgs.msg import ikSolveParam
+        param = ikSolveParam()
+        param.major_optimality_tol = 1e-3
+        param.major_feasibility_tol = 1e-3
+        param.minor_feasibility_tol = 1e-3
+        param.major_iterations_limit = 500
+        param.oritation_constraint_tol = 1e-3
+        param.pos_constraint_tol = 1e-3
+        param.pos_cost_weight = float(pos_cost_weight)
+        param.constraint_mode = int(constraint_mode)
+        return param
+
+    def _call_fk(self, q14_rad, timeout=None):
+        import rospy
+        try:
+            from kuavo_msgs.srv import fkSrv
+            rospy.wait_for_service("/ik/fk_srv",
+                                   timeout=timeout or self.IK_TIMEOUT)
+            res = rospy.ServiceProxy("/ik/fk_srv", fkSrv)(list(q14_rad))
+            if not res.success:
+                rospy.logwarn("FK服务返回失败")
+                return None
+            return res.hand_poses
+        except Exception as e:
+            rospy.logwarn_throttle(5.0, "FK服务不可用: %s", e)
+            return None
+
+    def _quat_angle_error(self, q1, q2):
+        import math
+        if q1 is None or q2 is None:
+            return None
+        dot = sum(float(q1[i]) * float(q2[i]) for i in range(4))
+        dot = max(-1.0, min(1.0, abs(dot)))
+        return 2.0 * math.acos(dot)
+
+    def _quat_to_matrix(self, quat_xyzw):
+        q = np.array(quat_xyzw, dtype=np.float64)
+        n = np.linalg.norm(q)
+        if n < 1e-8:
+            return np.eye(3)
+        x, y, z, w = q / n
+        return np.array([
+            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w),
+             2 * (x * z + y * w)],
+            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z),
+             2 * (y * z - x * w)],
+            [2 * (x * z - y * w), 2 * (y * z + x * w),
+             1 - 2 * (x * x + y * y)],
+        ], dtype=np.float64)
+
+    def _down_axis_error(self, quat_xyzw):
+        """末端局部 -Z 与 base_link -Z 的夹角(rad)。"""
+        import math
+        rot = self._quat_to_matrix(quat_xyzw)
+        local_minus_z = -rot[:, 2]
+        target_down = np.array([0.0, 0.0, -1.0], dtype=np.float64)
+        denom = np.linalg.norm(local_minus_z)
+        if denom < 1e-8:
+            return None
+        dot = float(np.dot(local_minus_z / denom, target_down))
+        dot = max(-1.0, min(1.0, dot))
+        return math.acos(dot)
+
+    def _solve_top_down_ik(self, arm, target_xyz, target_quat,
+                           seed_q14=None,
+                           constraint_mode=None, pos_cost_weight=2.0):
+        """调用 URDF IK 服务，把末端位置和朝下姿态一起纳入求解。"""
+        import math
+        import rospy
+        try:
+            from kuavo_msgs.msg import twoArmHandPoseCmd
+            from kuavo_msgs.srv import twoArmHandPoseCmdSrv
+
+            current = (list(seed_q14) if seed_q14 is not None
+                       else self._current_arm_joints_rad(timeout=0.2))
+            fk_poses = self._call_fk(current, timeout=self.IK_TIMEOUT)
+            if fk_poses is None:
+                return None
+
+            req = twoArmHandPoseCmd()
+            req.use_custom_ik_param = True
+            req.joint_angles_as_q0 = True
+            req.ik_param = self._make_ik_param(
+                constraint_mode if constraint_mode is not None
+                else self.IK_MODE_THREE_POINT_MIXED,
+                pos_cost_weight,
+            )
+            req.hand_poses.left_pose.joint_angles = list(current[:7])
+            req.hand_poses.right_pose.joint_angles = list(current[7:])
+            req.hand_poses.left_pose.elbow_pos_xyz = [0.0, 0.0, 0.0]
+            req.hand_poses.right_pose.elbow_pos_xyz = [0.0, 0.0, 0.0]
+
+            if arm == "left":
+                req.hand_poses.left_pose.pos_xyz = list(target_xyz)
+                req.hand_poses.left_pose.quat_xyzw = list(target_quat)
+                req.hand_poses.right_pose.pos_xyz = list(fk_poses.right_pose.pos_xyz)
+                req.hand_poses.right_pose.quat_xyzw = list(fk_poses.right_pose.quat_xyzw)
+            else:
+                req.hand_poses.left_pose.pos_xyz = list(fk_poses.left_pose.pos_xyz)
+                req.hand_poses.left_pose.quat_xyzw = list(fk_poses.left_pose.quat_xyzw)
+                req.hand_poses.right_pose.pos_xyz = list(target_xyz)
+                req.hand_poses.right_pose.quat_xyzw = list(target_quat)
+
+            rospy.wait_for_service("/ik/two_arm_hand_pose_cmd_srv",
+                                   timeout=self.IK_TIMEOUT)
+            res = rospy.ServiceProxy("/ik/two_arm_hand_pose_cmd_srv",
+                                     twoArmHandPoseCmdSrv)(req)
+            if not res.success:
+                rospy.logwarn("Top-down IK失败: %s",
+                              getattr(res, "error_reason", "unknown"))
+                return None
+
+            if len(res.q_arm) >= 14:
+                q14 = list(res.q_arm[:14])
+            else:
+                left_q = list(res.hand_poses.left_pose.joint_angles)
+                right_q = list(res.hand_poses.right_pose.joint_angles)
+                if len(left_q) != 7 or len(right_q) != 7:
+                    rospy.logwarn("IK返回关节维度异常: left=%d right=%d",
+                                  len(left_q), len(right_q))
+                    return None
+                q14 = left_q + right_q
+
+            joints_rad = q14[:7] if arm == "left" else q14[7:14]
+            joints_deg = [math.degrees(v) for v in joints_rad]
+            joints_deg = self._clamp_joints(joints_deg, arm)
+            return joints_deg, q14
+        except Exception as e:
+            rospy.logwarn_throttle(5.0, "Top-down IK服务不可用: %s", e)
+            return None
+
+    def _fallback_top_down_joints(self, target_xyz, arm):
+        """IK服务不可用时的几何IK回退：位置优先，腕部pitch补偿朝下。"""
+        bx, by, bz = target_xyz
+        raw = self._compute_arm_to_target(bx, by, bz, arm, z_offset=0.0)
+        joints = self._clamp_joints(raw, arm)
+        # 近似让 shoulder pitch + elbow + wrist pitch 的总pitch回到竖直。
+        joints[5] = -joints[0] - joints[3]
+        joints = self._clamp_joints(joints, arm)
+        return joints
+
+    def _plan_top_down_grasp(self, bx, by, bz, arm):
+        target_quat = self._target_quat_for_arm(arm)
+        approach_xyz = [
+            float(bx),
+            float(by),
+            float(bz + self.GRASP_APPROACH_CLEARANCE),
+        ]
+        grasp_xyz = [
+            float(bx),
+            float(by),
+            float(bz + self.GRASP_DESCEND_CLEARANCE),
+        ]
+
+        approach = self._solve_top_down_ik(
+            arm, approach_xyz, target_quat,
+            constraint_mode=self.IK_MODE_THREE_POINT_MIXED,
+            pos_cost_weight=2.0,
+        )
+        grasp = None
+        if approach is not None:
+            grasp = self._solve_top_down_ik(
+                arm, grasp_xyz, target_quat,
+                seed_q14=approach[1],
+                constraint_mode=self.IK_MODE_THREE_POINT_MIXED,
+                pos_cost_weight=2.0,
+            )
+
+        if approach is not None and grasp is not None:
+            approach_joints, approach_q14 = approach
+            grasp_joints, grasp_q14 = grasp
+            self._verify_fk_plan(arm, approach_q14, approach_xyz,
+                                 target_quat, "approach")
+            self._verify_fk_plan(arm, grasp_q14, grasp_xyz,
+                                 target_quat, "grasp")
+            return {
+                "arm": arm,
+                "approach_xyz": approach_xyz,
+                "grasp_xyz": grasp_xyz,
+                "target_quat": target_quat,
+                "approach_joints": approach_joints,
+                "grasp_joints": grasp_joints,
+                "used_ik": True,
+            }
+
+        rospy = __import__('rospy')
+        rospy.logwarn("Top-down IK不可用，使用几何IK回退规划")
+        return {
+            "arm": arm,
+            "approach_xyz": approach_xyz,
+            "grasp_xyz": grasp_xyz,
+            "target_quat": target_quat,
+            "approach_joints": self._fallback_top_down_joints(approach_xyz, arm),
+            "grasp_joints": self._fallback_top_down_joints(grasp_xyz, arm),
+            "used_ik": False,
+        }
+
+    def _verify_fk_plan(self, arm, q14_rad, target_xyz, target_quat, label):
+        import math
+        import rospy
+        fk = self._call_fk(q14_rad, timeout=self.IK_TIMEOUT)
+        if fk is None:
+            return
+        pose = fk.left_pose if arm == "left" else fk.right_pose
+        actual = np.array(list(pose.pos_xyz), dtype=np.float64)
+        desired = np.array(target_xyz, dtype=np.float64)
+        pos_err = float(np.linalg.norm(actual - desired))
+        quat_err = self._quat_angle_error(list(pose.quat_xyzw), target_quat)
+        down_err = self._down_axis_error(list(pose.quat_xyzw))
+        rospy.loginfo(
+            "[FK校验:%s/%s] pos_err=%.3fm quat_err=%s down_err=%s actual=(%.3f,%.3f,%.3f)",
+            arm, label, pos_err,
+            "%.1f°" % math.degrees(quat_err) if quat_err is not None else "n/a",
+            "%.1f°" % math.degrees(down_err) if down_err is not None else "n/a",
+            actual[0], actual[1], actual[2])
+        if pos_err > self.FK_POSITION_WARN:
+            rospy.logwarn("[FK校验:%s/%s] 末端位置误差偏大: %.3fm",
+                          arm, label, pos_err)
+
+    def _verify_tf_pose(self, arm, target_xyz, target_quat, label):
+        """用当前 TF 树检查实际末端 frame，验证 URDF/TF 下的落点和朝向。"""
+        import math
+        import rospy
+        frame = "zarm_l7_end_effector" if arm == "left" else "zarm_r7_end_effector"
+        try:
+            tf = self._perception._tf_buffer.lookup_transform(
+                "base_link", frame, rospy.Time(0), rospy.Duration(0.5))
+            trans = tf.transform.translation
+            rot = tf.transform.rotation
+            actual_xyz = np.array([trans.x, trans.y, trans.z], dtype=np.float64)
+            desired_xyz = np.array(target_xyz, dtype=np.float64)
+            actual_quat = [rot.x, rot.y, rot.z, rot.w]
+            pos_err = float(np.linalg.norm(actual_xyz - desired_xyz))
+            quat_err = self._quat_angle_error(actual_quat, target_quat)
+            down_err = self._down_axis_error(actual_quat)
+            rospy.loginfo(
+                "[TF校验:%s/%s] frame=%s pos_err=%.3fm quat_err=%s down_err=%s actual=(%.3f,%.3f,%.3f)",
+                arm, label, frame, pos_err,
+                "%.1f°" % math.degrees(quat_err) if quat_err is not None else "n/a",
+                "%.1f°" % math.degrees(down_err) if down_err is not None else "n/a",
+                actual_xyz[0], actual_xyz[1], actual_xyz[2])
+            if down_err is not None and math.degrees(down_err) > self.DOWN_AXIS_WARN_DEG:
+                rospy.logwarn("[TF校验:%s/%s] 夹爪朝下角度偏差 %.1f°",
+                              arm, label, math.degrees(down_err))
+        except Exception as e:
+            rospy.logwarn_throttle(5.0, "TF校验失败 %s -> base_link: %s",
+                                   frame, e)
 
     # ── 腕部相机颜色检测 + 二次校准 ─────────────────
 
@@ -1586,55 +1875,56 @@ class Scene2Controller:
                     rospy.logerr("无有效 %s 坐标", target_class)
                     continue
 
-            # ═══ 抓取 — 抬臂避障 → 放到物体后7cm → 夹紧 ═══
+            # ═══ 抓取 — 直接规划夹爪到物体正上方，保持朝下姿态 ═══
             self._sleep_hold(1.0)
             arm = "left" if by > 0 else "right"
             rospy.loginfo("目标 Y=%.3f → 选%s臂", by, arm)
 
-            raw = self._compute_arm_to_target(bx, by, bz, arm)
-            clamped = self._clamp_joints(raw, arm)
-            any_clamped = any(abs(a - b) > 0.5 for a, b in zip(raw, clamped))
-            if any_clamped:
+            plan = self._plan_top_down_grasp(bx, by, bz, arm)
+            if plan is None:
                 fallback = "right" if arm == "left" else "left"
-                rospy.loginfo("%s臂不可达, 切换%s臂", arm, fallback)
+                rospy.loginfo("%s臂规划失败, 切换%s臂", arm, fallback)
                 arm = fallback
-                raw = self._compute_arm_to_target(bx, by, bz, arm)
-                clamped = self._clamp_joints(raw, arm)
-                if any(abs(a - b) > 0.5 for a, b in zip(raw, clamped)):
-                    rospy.logerr("双臂均不可达!")
+                plan = self._plan_top_down_grasp(bx, by, bz, arm)
+                if plan is None:
+                    rospy.logerr("双臂均无法生成top-down抓取规划!")
                     continue
 
-            sign = 1 if arm == "left" else -1
-            transit = [
-                clamped[0],
-                sign * max(abs(clamped[1]) + 20, 50),
-                clamped[2],
-                max(clamped[3] - 30, -100),
-                clamped[4], clamped[5], clamped[6],
-            ]
-            transit = self._clamp_joints(transit, arm)
-            rospy.loginfo("[Transit] %s臂 抬臂避障: %s", arm, transit)
-            self._send_arms(**{arm: transit})
+            rospy.loginfo("[TopDown] %s臂 approach=(%.3f,%.3f,%.3f) "
+                          "grasp=(%.3f,%.3f,%.3f) ik=%s",
+                          arm,
+                          plan["approach_xyz"][0],
+                          plan["approach_xyz"][1],
+                          plan["approach_xyz"][2],
+                          plan["grasp_xyz"][0],
+                          plan["grasp_xyz"][1],
+                          plan["grasp_xyz"][2],
+                          plan["used_ik"])
+
+            self._robot.control_gripper(0, arm)
+            rospy.sleep(0.2)
+
+            rospy.loginfo("[Approach] %s臂 夹爪正上方: %s",
+                          arm, [round(v, 1) for v in plan["approach_joints"]])
+            self._send_arms(**{arm: plan["approach_joints"]})
+            self._sleep_hold(1.5)
+            self._verify_tf_pose(arm, plan["approach_xyz"],
+                                 plan["target_quat"], "approach")
+
+            rospy.loginfo("[Descend] %s臂 垂直下探抓取点: %s",
+                          arm, [round(v, 1) for v in plan["grasp_joints"]])
+            self._send_arms(**{arm: plan["grasp_joints"]})
             self._sleep_hold(1.0)
-
-            reach_raw = self._compute_arm_to_target(bx - 0.07, by, bz, arm, z_offset=0.0)
-            reach = self._clamp_joints(reach_raw, arm)
-            reach = self._clamp_joints(reach, arm)
-            rospy.loginfo("[Reach] %s臂 直放物体后7cm: %s", arm, reach)
-
-            mid = [
-                transit[i] + (reach[i] - transit[i]) * 0.5
-                for i in range(7)
-            ]
-            mid = self._clamp_joints(mid, arm)
-            self._send_arms(**{arm: mid})
-            rospy.sleep(0.8)
-            self._send_arms(**{arm: reach})
-            self._sleep_hold(2.0)
+            self._verify_tf_pose(arm, plan["grasp_xyz"],
+                                 plan["target_quat"], "grasp")
 
             self._robot.control_gripper(70, arm)
             rospy.sleep(0.6)
             rospy.loginfo("[Grasp] %s臂 夹爪闭合 %s", arm, target_class)
+
+            rospy.loginfo("[Lift] %s臂 沿朝下姿态抬回正上方", arm)
+            self._send_arms(**{arm: plan["approach_joints"]})
+            self._sleep_hold(0.8)
 
         # ═══ Phase 4+: 暂不执行, 直接进入可视化 ═══
         self._exit_after_run = False
