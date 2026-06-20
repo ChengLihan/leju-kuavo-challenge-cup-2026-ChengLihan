@@ -1199,9 +1199,9 @@ class Scene2Controller:
 
     # ── 目标箱 → base_link 下的大致放置位置 ──
     BIN_POSITIONS = {
-        "purple_bin":  (0.45,  0.25),   # 左前方
-        "orange_bin":  (0.45,  0.00),   # 正前方
-        "blue_bin":    (0.45, -0.25),   # 右前方
+        "purple_bin":  (0.60,  0.25),
+        "orange_bin":  (0.60,  0.00),
+        "blue_bin":    (0.60, -0.25),
     }
 
     # 从上往下抓取：末端局部 -Z 轴接近 base_link 的 -Z 方向。
@@ -1209,6 +1209,11 @@ class Scene2Controller:
     TOP_DOWN_QUAT = {
         "right": [-0.081987, -0.152343, 0.857876, 0.483858],
         "left":  [-0.081987,  0.152343, 0.857876, -0.483858],
+    }
+    # 放置时夹爪水平：末端-Z指向base_link-X方向（水平前伸放入箱内）
+    HORIZONTAL_PLACE_QUAT = {
+        "right": [0.0, 0.707, 0.0, 0.707],
+        "left":  [0.0, 0.707, 0.0, 0.707],
     }
     GRASP_APPROACH_CLEARANCE = -0.02
     GRASP_DESCEND_CLEARANCE = -0.035
@@ -1757,7 +1762,7 @@ class Scene2Controller:
             return None
 
         bin_x, bin_y = self.BIN_POSITIONS[bin_name]
-        target_quat = self._target_quat_for_arm(arm)
+        target_quat = list(self.HORIZONTAL_PLACE_QUAT[arm])
         guard_xyz = [float(bin_x), float(bin_y), self.PLACE_GUARD_Z]
         release_xyz = [float(bin_x), float(bin_y), self.PLACE_RELEASE_Z]
 
@@ -1996,6 +2001,94 @@ class Scene2Controller:
         self._sleep_hold(2.0)
 
     # ═══════════════════════════════════════════════════════
+    # 各物体类型专用抓取流程
+    # ═══════════════════════════════════════════════════════
+
+    def _pick_place_pipe_fitting(self, bx, by, bz, arm=None):
+        """pipe_fitting 专用：base_link坐标 → 规划 → 抓取 → 放箱。
+        Args:
+            bx, by, bz: 物体在 base_link 下的坐标
+            arm: 指定手臂("left"/"right")，None则按Y自动选臂
+        Returns:
+            bool: True=成功, False=失败需跳过
+        """
+        import rospy
+        import math
+
+        if arm is None:
+            arm = "left" if by > 0 else "right"
+        rospy.loginfo("[pipe_fitting] 目标 Y=%.3f → 选%s臂", by, arm)
+
+        plan = self._plan_top_down_grasp(bx, by, bz, arm)
+        if plan is None:
+            fallback = "right" if arm == "left" else "left"
+            rospy.loginfo("[pipe_fitting] %s臂规划失败, 切换%s臂", arm, fallback)
+            arm = fallback
+            plan = self._plan_top_down_grasp(bx, by, bz, arm)
+            if plan is None:
+                rospy.logerr("[pipe_fitting] 双臂均无法生成top-down抓取规划!")
+                return False
+
+        rospy.loginfo("[TopDown] %s臂 guard=(%.3f,%.3f,%.3f) "
+                      "approach=(%.3f,%.3f,%.3f) grasp=(%.3f,%.3f,%.3f) ik=%s",
+                      arm,
+                      plan["guard_xyz"][0], plan["guard_xyz"][1], plan["guard_xyz"][2],
+                      plan["approach_xyz"][0], plan["approach_xyz"][1], plan["approach_xyz"][2],
+                      plan["grasp_xyz"][0], plan["grasp_xyz"][1], plan["grasp_xyz"][2],
+                      plan["used_ik"])
+
+        self._robot.control_gripper(0, arm)
+        rospy.sleep(0.2)
+
+        rospy.loginfo("[Guard] %s臂 桌面避障高位: %s",
+                      arm, [round(v, 1) for v in plan["guard_joints"]])
+        self._move_arm_slow(arm, plan["guard_joints"], duration=2.0, steps=12)
+        self._sleep_hold(0.3)
+        self._verify_tf_pose(arm, plan["guard_xyz"],
+                             plan["target_quat"], "guard", table_z_ref=bz)
+
+        rospy.loginfo("[Approach] %s臂 夹爪正上方: %s",
+                      arm, [round(v, 1) for v in plan["approach_joints"]])
+        self._move_arm_slow(arm, plan["approach_joints"], duration=2.0, steps=12)
+        self._sleep_hold(0.3)
+        self._verify_tf_pose(arm, plan["approach_xyz"],
+                             plan["target_quat"], "approach", table_z_ref=bz)
+
+        rospy.loginfo("[Descend] %s臂 垂直下探抓取点: %s",
+                      arm, [round(v, 1) for v in plan["grasp_joints"]])
+        self._move_arm_slow(arm, plan["grasp_joints"], duration=1.5, steps=10)
+        self._sleep_hold(0.3)
+        self._verify_tf_pose(arm, plan["grasp_xyz"],
+                             plan["target_quat"], "grasp")
+
+        rospy.loginfo("[DescendRepeat] %s臂 重复确认夹爪到物体方位", arm)
+        self._move_arm_slow(arm, plan["grasp_joints"], duration=1.5, steps=10)
+        self._sleep_hold(0.3)
+        self._verify_tf_pose(arm, plan["grasp_xyz"],
+                             plan["target_quat"], "grasp_repeat")
+
+        if not self._wait_for_grasp_tf_ready(arm, plan):
+            rospy.logwarn("[Grasp] %s臂 TF姿态未满足10°要求，跳过闭爪", arm)
+            return False
+
+        self._robot.control_gripper(70, arm)
+        rospy.sleep(0.6)
+        rospy.loginfo("[Grasp] %s臂 夹爪闭合 pipe_fitting", arm)
+
+        rospy.loginfo("[LiftSlow] %s臂 缓慢抬回物体正上方", arm)
+        self._move_arm_slow(arm, plan["approach_joints"],
+                            duration=2.0, steps=12)
+        self._sleep_hold(0.4)
+
+        rospy.loginfo("[RetreatSlow] %s臂 缓慢退回桌面避障高位", arm)
+        self._move_arm_slow(arm, plan["guard_joints"],
+                            duration=1.5, steps=10)
+        self._sleep_hold(0.4)
+
+        self._place_object_in_bin("pipe_fitting", arm)
+        return True
+
+    # ═══════════════════════════════════════════════════════
     # 主流程: 检测 → 校准 → 抓取 → 放箱
     # ═══════════════════════════════════════════════════════
 
@@ -2029,161 +2122,97 @@ class Scene2Controller:
         rospy.sleep(0.5)
         rospy.loginfo("[初始化] 手臂模式重锁")
 
-        # ═══ Phase 2-3: 循环处理每个零件类别 ═══
-        TARGET_CLASSES = ["pipe_fitting"]
-        for target_class in TARGET_CLASSES:
-            rospy.loginfo("开始检测 %s ...", target_class)
-            self._sleep_hold(0.5)
+        # ═══ Phase 2: 首次检测 — 收集所有 pipe_fitting 位置 ═══
+        target_class = "pipe_fitting"
+        rospy.loginfo("首次检测: %s ...", target_class)
+        self._sleep_hold(0.5)
+        self._perception.republish_viz()
 
-            objects = self._perception.get_objects_3d_yolo()
-            objects_3d = [o for o in (objects or [])
-                          if "position_base" in o and o["confidence"] >= 0.5
-                          and o["class_name"] == target_class
-                          and abs(o["position_base"][0]) < 2.0]
+        objects = self._perception.get_objects_3d_yolo()
+        objects_3d = [o for o in (objects or [])
+                      if "position_base" in o and o["confidence"] >= 0.5
+                      and o["class_name"] == target_class
+                      and abs(o["position_base"][0]) < 2.0]
 
-            if not objects_3d:
-                rospy.logerr("未检测到 %s，跳过", target_class)
-                continue
-
-            # 选最左侧的 (Y最大)
+        if not objects_3d:
+            rospy.logerr("未检测到 %s", target_class)
+        else:
+            # 按左→右排序 (Y从大到小)
             objects_3d.sort(key=lambda o: o["position_base"][1], reverse=True)
-            best = objects_3d[0]
+            all_positions = [(o["position_base"][0],
+                              o["position_base"][1],
+                              o["position_base"][2]) for o in objects_3d]
+            rospy.loginfo("检测到 %d 个 %s: %s",
+                          len(all_positions), target_class,
+                          ["(%.3f,%.3f,%.3f)" % p for p in all_positions])
 
-            rospy.loginfo("目标: %s conf=%.3f  base=(%.3f,%.3f,%.3f)",
-                          best["class_name"], best["confidence"],
-                          best["position_base"][0],
-                          best["position_base"][1],
-                          best["position_base"][2])
+            # ═══ Phase 3: 逐个抓取放置 ═══
+            for pick_i, (bx, by, bz) in enumerate(all_positions):
+                rospy.loginfo("[%s] 抓取 %d/%d 初始坐标=(%.3f,%.3f,%.3f)",
+                              target_class, pick_i + 1, len(all_positions),
+                              bx, by, bz)
 
-            # ═══ 收敛采集 — 连续2帧稳定(数=6,差<3cm)即平均 ═══
-            self._sleep_hold(1.0)
-            rospy.loginfo("收敛采集: 等待连续2帧稳定...")
-            prev_x = prev_y = prev_z = None
-            prev_count = 0
-            bx = by = bz = 0.0
-            max_frames = 30
-            for frame_i in range(max_frames):
-                self._hold_arms()
-                rospy.sleep(0.4)
-                self._perception.republish_viz()
-                objs = self._perception.get_objects_3d_yolo()
-                class_objs = [o for o in (objs or [])
-                             if o.get("class_name") == target_class
-                             and "position_base" in o
-                             and o["confidence"] >= 0.5]
-                total_objs = len([o for o in (objs or [])
-                                  if "position_base" in o and o["confidence"] >= 0.5])
-                if not class_objs:
-                    continue
-                class_objs.sort(key=lambda o: o["position_base"][1], reverse=True)
-                cur = class_objs[0]["position_base"]
-                cur_x, cur_y, cur_z = cur[0], cur[1], cur[2]
-                dist = 999 if prev_x is None else math.hypot(cur_x - prev_x, cur_y - prev_y)
+                if pick_i == 0:
+                    # 首次抓取：收敛采集精确定位
+                    self._sleep_hold(1.0)
+                    rospy.loginfo("收敛采集: 等待连续2帧稳定...")
+                    prev_x = prev_y = prev_z = None
+                    prev_count = 0
+                    max_frames = 30
+                    for frame_i in range(max_frames):
+                        self._hold_arms()
+                        rospy.sleep(0.4)
+                        self._perception.republish_viz()
+                        objs = self._perception.get_objects_3d_yolo()
+                        class_objs = [o for o in (objs or [])
+                                     if o.get("class_name") == target_class
+                                     and "position_base" in o
+                                     and o["confidence"] >= 0.5]
+                        total_objs = len([o for o in (objs or [])
+                                          if "position_base" in o and o["confidence"] >= 0.5])
+                        if not class_objs:
+                            continue
+                        class_objs.sort(key=lambda o: o["position_base"][1], reverse=True)
+                        cur = class_objs[0]["position_base"]
+                        cur_x, cur_y, cur_z = cur[0], cur[1], cur[2]
+                        dist = 999 if prev_x is None else math.hypot(cur_x - prev_x, cur_y - prev_y)
 
-                rospy.loginfo("[收敛 %d/%d] 总数=%d %s=(%.3f,%.3f,%.3f) "
-                              "Δpos=%.3f prev_cnt=%d",
-                              frame_i + 1, max_frames,
-                              total_objs, target_class, cur_x, cur_y, cur_z,
-                              dist, prev_count)
+                        rospy.loginfo("[收敛 %d/%d] 总数=%d %s=(%.3f,%.3f,%.3f) "
+                                      "Δpos=%.3f prev_cnt=%d",
+                                      frame_i + 1, max_frames,
+                                      total_objs, target_class, cur_x, cur_y, cur_z,
+                                      dist, prev_count)
 
-                if (prev_x is not None and total_objs == 6 and prev_count == 6
-                        and dist < 0.03):
-                    bx = (cur_x + prev_x) / 2.0
-                    by = (cur_y + prev_y) / 2.0
-                    bz = (cur_z + prev_z) / 2.0
-                    rospy.loginfo("→ 收敛! 2帧平均: (%.3f, %.3f, %.3f)", bx, by, bz)
-                    break
+                        if (prev_x is not None and total_objs == 6 and prev_count == 6
+                                and dist < 0.03):
+                            bx = (cur_x + prev_x) / 2.0
+                            by = (cur_y + prev_y) / 2.0
+                            bz = (cur_z + prev_z) / 2.0
+                            rospy.loginfo("→ 收敛! 2帧平均: (%.3f, %.3f, %.3f)", bx, by, bz)
+                            # 用收敛后的位置更新已保存列表
+                            all_positions[pick_i] = (bx, by, bz)
+                            break
 
-                prev_x, prev_y, prev_z = cur_x, cur_y, cur_z
-                prev_count = total_objs
-            else:
-                if prev_x is not None:
-                    bx, by, bz = prev_x, prev_y, prev_z
-                    rospy.logwarn("未收敛, 用最后帧: (%.3f, %.3f, %.3f)", bx, by, bz)
-                else:
-                    rospy.logerr("无有效 %s 坐标", target_class)
-                    continue
+                        prev_x, prev_y, prev_z = cur_x, cur_y, cur_z
+                        prev_count = total_objs
+                    else:
+                        if prev_x is not None:
+                            bx, by, bz = prev_x, prev_y, prev_z
+                            rospy.logwarn("未收敛, 用最后帧: (%.3f, %.3f, %.3f)", bx, by, bz)
+                            all_positions[pick_i] = (bx, by, bz)
+                        else:
+                            rospy.logerr("无有效 %s 坐标", target_class)
+                            continue
 
-            # ═══ 抓取 — 直接规划夹爪到物体正上方，保持朝下姿态 ═══
-            self._sleep_hold(1.0)
-            arm = "left" if by > 0 else "right"
-            rospy.loginfo("目标 Y=%.3f → 选%s臂", by, arm)
+                # 不再检测 — 直接使用已保存坐标抓取
+                rospy.loginfo("[%s] 抓取 %d/%d 坐标=(%.3f,%.3f,%.3f)",
+                              target_class, pick_i + 1, len(all_positions),
+                              bx, by, bz)
 
-            plan = self._plan_top_down_grasp(bx, by, bz, arm)
-            if plan is None:
-                fallback = "right" if arm == "left" else "left"
-                rospy.loginfo("%s臂规划失败, 切换%s臂", arm, fallback)
-                arm = fallback
-                plan = self._plan_top_down_grasp(bx, by, bz, arm)
-                if plan is None:
-                    rospy.logerr("双臂均无法生成top-down抓取规划!")
-                    continue
-
-            rospy.loginfo("[TopDown] %s臂 guard=(%.3f,%.3f,%.3f) "
-                          "approach=(%.3f,%.3f,%.3f) grasp=(%.3f,%.3f,%.3f) ik=%s",
-                          arm,
-                          plan["guard_xyz"][0],
-                          plan["guard_xyz"][1],
-                          plan["guard_xyz"][2],
-                          plan["approach_xyz"][0],
-                          plan["approach_xyz"][1],
-                          plan["approach_xyz"][2],
-                          plan["grasp_xyz"][0],
-                          plan["grasp_xyz"][1],
-                          plan["grasp_xyz"][2],
-                          plan["used_ik"])
-
-            self._robot.control_gripper(0, arm)
-            rospy.sleep(0.2)
-
-            rospy.loginfo("[Guard] %s臂 桌面避障高位: %s",
-                          arm, [round(v, 1) for v in plan["guard_joints"]])
-            self._move_arm_slow(arm, plan["guard_joints"], duration=2.0, steps=12)
-            self._sleep_hold(0.3)
-            self._verify_tf_pose(arm, plan["guard_xyz"],
-                                 plan["target_quat"], "guard",
-                                 table_z_ref=bz)
-
-            rospy.loginfo("[Approach] %s臂 夹爪正上方: %s",
-                          arm, [round(v, 1) for v in plan["approach_joints"]])
-            self._move_arm_slow(arm, plan["approach_joints"], duration=2.0, steps=12)
-            self._sleep_hold(0.3)
-            self._verify_tf_pose(arm, plan["approach_xyz"],
-                                 plan["target_quat"], "approach",
-                                 table_z_ref=bz)
-
-            rospy.loginfo("[Descend] %s臂 垂直下探抓取点: %s",
-                          arm, [round(v, 1) for v in plan["grasp_joints"]])
-            self._move_arm_slow(arm, plan["grasp_joints"], duration=1.5, steps=10)
-            self._sleep_hold(0.3)
-            self._verify_tf_pose(arm, plan["grasp_xyz"],
-                                 plan["target_quat"], "grasp")
-
-            rospy.loginfo("[DescendRepeat] %s臂 重复确认夹爪到物体方位", arm)
-            self._move_arm_slow(arm, plan["grasp_joints"], duration=1.5, steps=10)
-            self._sleep_hold(0.3)
-            self._verify_tf_pose(arm, plan["grasp_xyz"],
-                                 plan["target_quat"], "grasp_repeat")
-
-            if not self._wait_for_grasp_tf_ready(arm, plan):
-                rospy.logwarn("[Grasp] %s臂 TF姿态未满足10°要求，跳过闭爪", arm)
-                continue
-
-            self._robot.control_gripper(70, arm)
-            rospy.sleep(0.6)
-            rospy.loginfo("[Grasp] %s臂 夹爪闭合 %s", arm, target_class)
-
-            rospy.loginfo("[LiftSlow] %s臂 缓慢抬回物体正上方", arm)
-            self._move_arm_slow(arm, plan["approach_joints"],
-                                duration=2.0, steps=12)
-            self._sleep_hold(0.4)
-
-            rospy.loginfo("[RetreatSlow] %s臂 缓慢退回桌面避障高位", arm)
-            self._move_arm_slow(arm, plan["guard_joints"],
-                                duration=1.5, steps=10)
-            self._sleep_hold(0.4)
-
-            self._place_object_in_bin(target_class, arm)
+                if self._pick_place_pipe_fitting(bx, by, bz):
+                    rospy.loginfo("[%s] %d/%d 完成", target_class,
+                                  pick_i + 1, len(all_positions))
+                rospy.sleep(0.5)
 
         # ═══ 任务完成, 进入可视化保持 ═══
         rospy.loginfo("[完成] 任务完成, 进入可视化保持, Ctrl-C退出")
