@@ -1199,9 +1199,9 @@ class Scene2Controller:
 
     # ── 目标箱 → base_link 下的大致放置位置 ──
     BIN_POSITIONS = {
-        "purple_bin":  (0.45, -0.25),
-        "blue_bin":    (0.45,  0.00),
-        "orange_bin":  (0.45,  0.25),
+        "purple_bin":  (0.45,  0.25),   # 左前方
+        "orange_bin":  (0.45,  0.00),   # 正前方
+        "blue_bin":    (0.45, -0.25),   # 右前方
     }
 
     # 从上往下抓取：末端局部 -Z 轴接近 base_link 的 -Z 方向。
@@ -1211,7 +1211,7 @@ class Scene2Controller:
         "left":  [-0.081987,  0.152343, 0.857876, -0.483858],
     }
     GRASP_APPROACH_CLEARANCE = -0.02
-    GRASP_DESCEND_CLEARANCE = 0.015
+    GRASP_DESCEND_CLEARANCE = -0.035
     TABLE_GUARD_CLEARANCE = 0.20
     TABLE_EE_MIN_CLEARANCE = 0.08
     IK_MODE_POS_HARD_ORI_SOFT = 0x02
@@ -2065,6 +2065,7 @@ class Scene2Controller:
             for frame_i in range(max_frames):
                 self._hold_arms()
                 rospy.sleep(0.4)
+                self._perception.republish_viz()
                 objs = self._perception.get_objects_3d_yolo()
                 class_objs = [o for o in (objs or [])
                              if o.get("class_name") == target_class
@@ -2137,30 +2138,30 @@ class Scene2Controller:
 
             rospy.loginfo("[Guard] %s臂 桌面避障高位: %s",
                           arm, [round(v, 1) for v in plan["guard_joints"]])
-            self._send_arms(**{arm: plan["guard_joints"]})
-            self._sleep_hold(1.2)
+            self._move_arm_slow(arm, plan["guard_joints"], duration=2.0, steps=12)
+            self._sleep_hold(0.3)
             self._verify_tf_pose(arm, plan["guard_xyz"],
                                  plan["target_quat"], "guard",
                                  table_z_ref=bz)
 
             rospy.loginfo("[Approach] %s臂 夹爪正上方: %s",
                           arm, [round(v, 1) for v in plan["approach_joints"]])
-            self._send_arms(**{arm: plan["approach_joints"]})
-            self._sleep_hold(1.5)
+            self._move_arm_slow(arm, plan["approach_joints"], duration=2.0, steps=12)
+            self._sleep_hold(0.3)
             self._verify_tf_pose(arm, plan["approach_xyz"],
                                  plan["target_quat"], "approach",
                                  table_z_ref=bz)
 
             rospy.loginfo("[Descend] %s臂 垂直下探抓取点: %s",
                           arm, [round(v, 1) for v in plan["grasp_joints"]])
-            self._send_arms(**{arm: plan["grasp_joints"]})
-            self._sleep_hold(1.0)
+            self._move_arm_slow(arm, plan["grasp_joints"], duration=1.5, steps=10)
+            self._sleep_hold(0.3)
             self._verify_tf_pose(arm, plan["grasp_xyz"],
                                  plan["target_quat"], "grasp")
 
             rospy.loginfo("[DescendRepeat] %s臂 重复确认夹爪到物体方位", arm)
-            self._send_arms(**{arm: plan["grasp_joints"]})
-            self._sleep_hold(0.6)
+            self._move_arm_slow(arm, plan["grasp_joints"], duration=1.5, steps=10)
+            self._sleep_hold(0.3)
             self._verify_tf_pose(arm, plan["grasp_xyz"],
                                  plan["target_quat"], "grasp_repeat")
 
@@ -2184,62 +2185,12 @@ class Scene2Controller:
 
             self._place_object_in_bin(target_class, arm)
 
-        # ═══ Phase 4+: 暂不执行, 直接进入可视化 ═══
-        self._exit_after_run = False
-        rospy.loginfo("[暂停] Phase4-6 暂不运行, 进入可视化保持, Ctrl-C退出")
+        # ═══ 任务完成, 进入可视化保持 ═══
+        rospy.loginfo("[完成] 任务完成, 进入可视化保持, Ctrl-C退出")
         rate = rospy.Rate(2)
         while not rospy.is_shutdown():
-            self._perception.get_objects_3d_yolo()
             self._perception.republish_viz()
             rate.sleep()
-
-        # ---- 以下暂不执行 ----
-        if False:
-            # ═══ Phase 4: 腕部相机精调 (黑色检测) ═══
-            self._sleep_hold(3.0)
-            rospy.loginfo("[精调] 开始腕部相机黑色检测校准...")
-            refined_joints = self._fine_align_wrist(clamped, arm,
-                                                    detector=self._detect_black_in_wrist)
-
-            # ═══ Phase 5: 抓取 ═══
-            self._sleep_hold(3.0)
-            rospy.loginfo("[抓取] 执行抓取动作")
-            self._execute_pick(refined_joints, arm)
-
-            # ═══ Phase 6: 移动到目标箱 → 放置 ═══
-            self._sleep_hold(3.0)
-            bin_x, bin_y = self.BIN_POSITIONS["blue_bin"]
-            bin_z = 0.05
-            rospy.loginfo("[放箱] 目标: blue_bin (%.2f, %.2f)", bin_x, bin_y)
-
-            bin_raw = self._compute_arm_to_target(bin_x, bin_y, bin_z, arm)
-            bin_clamped = self._clamp_joints(bin_raw, arm)
-            rospy.loginfo("[放箱] %s臂 → bin上方: %s", arm, bin_clamped)
-            self._send_arms(**{arm: bin_clamped})
-            self._sleep_hold(3.0)
-
-            lower_bin = [
-                bin_clamped[0] - 5,
-                bin_clamped[1],
-                bin_clamped[2],
-                min(bin_clamped[3] + 20, 0),
-                0, 0, 0,
-            ]
-            lower_bin_clamped = self._clamp_joints(lower_bin, arm)
-            rospy.loginfo("[放箱] 放入: %s", lower_bin_clamped)
-            self._send_arms(**{arm: lower_bin_clamped})
-            self._sleep_hold(3.0)
-
-            self._robot.control_gripper(0, arm)
-            rospy.sleep(0.5)
-            rospy.loginfo("[放箱] 释放完成")
-
-            home_right = [0, -30, 0, -30, 0, 0, 0]
-            home_left  = [0,  30, 0, -30, 0, 0, 0]
-            home = home_left if arm == "left" else home_right
-            self._send_arms(**{arm: home})
-            self._sleep_hold(2.0)
-            rospy.loginfo("[完成] pipe_clamp 已放入蓝色箱")
 
 class Scene3Controller:
     """场景三：SMT 料盘出库。"""
