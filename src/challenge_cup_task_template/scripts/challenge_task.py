@@ -30,8 +30,6 @@ SCENE_CONFIGS = {
 
 
 def _load_launcher():
-    # 公共启动器位于受保护包 challenge_cup_simulator/utils/（选手不可改动），
-    # 从那里导入，确保完整性校验无法被绕过。
     try:
         import rospkg
         sim_utils = os.path.join(rospkg.RosPack().get_path("challenge_cup_simulator"), "utils")
@@ -41,6 +39,24 @@ def _load_launcher():
     sys.path.insert(0, sim_utils)
     from challenge_sim_launcher import ChallengeSimLauncher
     return ChallengeSimLauncher
+
+
+def _get_src_dir():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
+
+
+def _run_scene3():
+    import rospy
+    src_dir = _get_src_dir()
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
+    from scene3_controller import Scene3TaskController
+    controller = Scene3TaskController()
+    success = controller.run()
+    if success:
+        rospy.loginfo("Scene3 task completed successfully!")
+    else:
+        rospy.logerr("Scene3 task FAILED.")
 
 
 def run_scene(scene, seed, node_name=None, timeout=120,
@@ -60,43 +76,17 @@ def run_scene(scene, seed, node_name=None, timeout=120,
     launcher.start(node_name=node_name or config["node_name"], timeout=timeout)
 
     import rospy
-    from geometry_msgs.msg import Twist
-    from sensor_msgs.msg import JointState
 
     rospy.loginfo("=== %s任务启动 ===", config["title"])
-
-    cmd_vel_pub = rospy.Publisher("/cmd_vel", Twist, queue_size=10)
-    arm_traj_pub = rospy.Publisher("/kuavo_arm_traj", JointState, queue_size=10)
 
     rospy.sleep(1.0)
     rospy.loginfo("场景实例已初始化。")
 
-    # ========================================
-    # TODO: 在此实现三场景共用或按 scene 分支的任务逻辑
-    # ========================================
-    #
-    # if scene == "scene1":
-    #     pass  # 包裹称重与摆放
-    # elif scene == "scene2":
-    #     pass  # 分拣归档
-    # elif scene == "scene3":
-    #     pass  # SMT 料盘出库
-    #
-    # 可用接口：
-    #   /cmd_vel                  geometry_msgs/Twist
-    #   /kuavo_arm_traj           sensor_msgs/JointState
-    #   /lidar/points             sensor_msgs/PointCloud2
-    #   /sensors_data_raw         kuavo_msgs/sensorsData
-    #   /control_robot_leju_claw  kuavo_msgs/controlLejuClaw
-    #   /leju_claw_command        kuavo_msgs/lejuClawCommand
-    #   /leju_claw_state          kuavo_msgs/lejuClawState
-    #
-    # 示例：
-    # twist = Twist()
-    # twist.linear.x = 0.1
-    # cmd_vel_pub.publish(twist)
-
-    rospy.spin()
+    if scene == "scene3":
+        _run_scene3()
+    else:
+        rospy.loginfo("Scene %s: task logic not yet implemented, waiting...", scene)
+        rospy.spin()
 
 
 def main():

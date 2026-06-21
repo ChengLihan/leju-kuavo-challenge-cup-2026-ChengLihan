@@ -1,0 +1,23 @@
+navigation:
+  approach_shelf_distance: 0.40
+  retreat_distance: 0.40
+  approach_box_distance: 0.40
+
+  max_forward_speed_shelf: 0.15
+  max_forward_speed_box: 0.15
+  max_backward_speed: 0.10
+  max_yaw_speed: 0.30
+
+  box_turn_yaw_rad: 3.1416
+
+timeouts:
+  init: 10.0
+  approach_shelf: 20.0
+  pregrasp: 8.0
+  extract: 20.0
+  transport: 6.0
+  retreat: 15.0
+  turn_to_box: 25.0
+  approach_box: 20.0
+  preplace: 8.0
+  place: 12.0

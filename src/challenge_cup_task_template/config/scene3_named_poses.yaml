@@ -1,0 +1,58 @@
+joint_order:
+  - l_arm_pitch
+  - l_arm_roll
+  - l_arm_yaw
+  - l_forearm_pitch
+  - l_hand_yaw
+  - l_hand_pitch
+  - l_hand_roll
+  - r_arm_pitch
+  - r_arm_roll
+  - r_arm_yaw
+  - r_forearm_pitch
+  - r_hand_yaw
+  - r_hand_pitch
+  - r_hand_roll
+
+poses:
+  safe_home:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [20, 0, 0, -30, 0, 0, 0]
+    description: "Default walking/standing pose from kuavo.json init_arm_pos"
+    duration: 2.0
+
+  upper_tray_pregrasp:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [10, -20, 0, -80, 0, 20, 0]
+    description: "Right arm reaches forward and upward toward upper tray; left stays safe"
+    duration: 3.0
+
+  tray_transport:
+    left: [10, 0, 0, -40, 0, 0, 0]
+    right: [10, 0, 0, -60, 0, 10, 0]
+    description: "Tucked elbows, tray held near body for safe transport"
+    duration: 2.0
+
+  box_preplace:
+    left: [10, 0, 0, -40, 0, 0, 0]
+    right: [20, -10, 0, -50, 0, 20, 0]
+    description: "Right arm extends forward and down above box"
+    duration: 3.0
+
+  box_release:
+    left: [10, 0, 0, -40, 0, 0, 0]
+    right: [20, -10, 0, -70, 0, 0, 0]
+    description: "Lower arm to release tray into box"
+    duration: 2.0
+
+  box_after_release:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [20, 0, 0, -30, 0, 0, 0]
+    description: "Return to safe pose after placing"
+    duration: 2.0
+
+  finish_home:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [20, 0, 0, -30, 0, 0, 0]
+    description: "Final home pose"
+    duration: 2.0
