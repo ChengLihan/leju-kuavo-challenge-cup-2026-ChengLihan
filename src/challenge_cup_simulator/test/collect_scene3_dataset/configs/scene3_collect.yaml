@@ -1,0 +1,181 @@
+scene:
+  name: scene3
+  target_slot: upper
+  target_tray_name: smt_tray_5
+  use_existing_sim: true
+  navigation_included: false
+
+navigation:
+  enabled: false
+  approach_shelf_distance: 1.00
+  max_forward_speed_shelf: 0.12
+  approach_timeout_sec: 20.0
+  approach_done_tolerance_m: 0.03
+  settle_after_nav_sec: 1.0
+  force_open_loop: false
+  require_position: false
+  base_position_topic: /state_estimate/base/pos_xyz
+  base_yaw_topic: /state_estimate/base/angular_zyx
+
+record:
+  output_dir: bags/scene3_tray_stow
+  record_rosbag: true
+  record_derived_topics: true
+  min_bag_size_mb: 1.0
+  min_rgb_fps: 25.0
+  min_depth_fps: 20.0
+  min_duration_sec: 3.0
+  max_duration_sec: 25.0
+  delete_failed_bag: true
+
+episode:
+  repeat: 1
+  max_attempts_per_seed: 5
+  topic_wait_timeout_sec: 20.0
+  launch_timeout_sec: 120.0
+  wait_for_user_ready: true
+  settle_before_record_sec: 0.6
+  settle_after_stow_sec: 1.0
+  hold_seconds: 0.0
+
+robot:
+  active_arm: right
+  use_both_arms: false
+  action_type: joint_delta
+  train_hz: 10
+  head_yaw_deg: 0.0
+  head_pitch_deg: -15.0
+
+expert:
+  pose_config: configs/scene3_named_poses.yaml
+  arm_command_topic: /kuavo_arm_traj
+  arm_target_topic: /kuavo_arm_target_poses
+  arm_command_hz: 100.0
+  arm_mode_service: /arm_traj_change_mode
+  external_control_mode: 2
+  restore_arm_mode_on_success: false
+  auto_swing_mode: 1
+  publish_arm_target_poses: false
+  truth_ik:
+    enabled: true
+    timeout_sec: 20.0
+    constraint_mode: 6
+    pos_cost_weight: 2.0
+    position_tolerance_m: 0.08
+    orientation_tolerance_deg: 70.0
+    settle_time: 0.2
+    quat_xyzw: [0.0, -0.70682518, 0.0, 0.70738827]
+    stage_offsets:
+      pregrasp:
+        x: -0.12
+        y: 0.00
+        z: 0.02
+        duration: 2.0
+      approach:
+        x: -0.05
+        y: 0.00
+        z: 0.00
+        duration: 1.2
+      extract_mid:
+        x: -0.16
+        y: 0.00
+        z: 0.00
+        duration: 1.0
+      extract_out:
+        x: -0.28
+        y: 0.00
+        z: 0.02
+        duration: 1.2
+      lift:
+        x: -0.28
+        y: 0.00
+        z: 0.10
+        duration: 1.0
+  shelf_avoidance:
+    enabled: true
+    pregrasp_waypoints:
+      - upper_tray_avoidance_high
+      - upper_tray_pregrasp
+    approach_waypoints:
+      - upper_tray_edge_approach
+    extract_waypoints:
+      - upper_tray_extract_mid
+      - upper_tray_extract_out
+      - upper_tray_post_extract_clearance
+    lift_waypoints:
+      - upper_tray_lift
+    stow_waypoints:
+      - upper_tray_shelf_clearance
+      - waist_stow_pose
+      - finish_hold_pose
+  gripper:
+    backend: joint_state
+    joint_command_topic: /gripper/command
+    leju_command_topic: /leju_claw_command
+    leju_service: /control_robot_leju_claw
+    command_hz: 100.0
+    open_position: 0.0
+    close_position: 255.0
+    leju_open_position: 10.0
+    leju_close_position: 90.0
+    velocity: 90.0
+    effort: 1.0
+    close_wait_sec: 0.5
+
+topics:
+  rgb: /cam_h/color/image_raw/compressed
+  depth: /cam_h/depth/image_raw/compressedDepth
+  camera_info: /cam_h/color/camera_info
+  sensors: /sensors_data_raw
+  claw_state: /leju_claw_state
+  tf: /tf
+  tf_static: /tf_static
+  cmd_vel: /cmd_vel
+  head_command: /robot_head_motion_data
+  arm_command: /kuavo_arm_traj
+  arm_target: /kuavo_arm_target_poses
+  gripper_command_joint: /gripper/command
+  gripper_command_leju: /leju_claw_command
+  stage: /scene3_collect/stage
+  expert_action: /scene3_collect/expert_action
+  head_xyzrgb_roi: /scene3_collect/head_xyzrgb_roi
+  episode_info: /scene3_collect/episode_info
+
+pointcloud:
+  source: head_rgbd
+  frame: base_link
+  camera_frame: cam_h_color_optical_frame
+  num_points: 1024
+  use_rgb: true
+  normalize_xyz: true
+  save_raw_xyz: true
+  save_normalized_xyz: true
+  precheck_required: true
+  min_roi_points: 300
+  max_depth_m: 4.0
+  stride: 2
+
+success:
+  use_privileged_check: true
+  use_pointcloud_check: false
+  target_tray_name: smt_tray_5
+  active_scene_xml: src/challenge_cup_simulator/models/biped_s52/xml/_scene_scene3_active.xml
+  min_extract_distance_m: 0.10
+  extract_distance_tolerance_m: 0.005
+  fail_on_non_target_tray_motion: true
+  max_non_target_tray_motion_m: 0.03
+  floor_z_threshold_m: 0.20
+  require_gripper_near_tray: true
+  gripper_reference_frame: base_link
+  active_gripper_frame: zarm_r7_end_effector
+  gripper_tf_timeout_sec: 1.0
+  max_gripper_tray_distance_m: 0.30
+  log_target_gripper_distance: true
+  require_waist_bbox: false
+  waist_stow_bbox:
+    x_min: 0.00
+    x_max: 0.55
+    y_min: -0.45
+    y_max: 0.45
+    z_min: 0.55
+    z_max: 1.20

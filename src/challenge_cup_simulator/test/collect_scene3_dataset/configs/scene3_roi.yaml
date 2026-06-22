@@ -1,0 +1,32 @@
+pointcloud:
+  frame: base_link
+  num_points: 1024
+  use_rgb: true
+  normalize_xyz: true
+  roi_scale: 0.5
+
+roi:
+  extract_upper:
+    x_min: 0.25
+    x_max: 0.90
+    y_min: -0.45
+    y_max: 0.45
+    z_min: 0.75
+    z_max: 1.35
+
+  waist_stow:
+    x_min: 0.00
+    x_max: 0.55
+    y_min: -0.45
+    y_max: 0.45
+    z_min: 0.55
+    z_max: 1.20
+
+stage_to_roi:
+  pregrasp: extract_upper
+  approach: extract_upper
+  close_gripper: extract_upper
+  extract: extract_upper
+  lift: extract_upper
+  stow: waist_stow
+
