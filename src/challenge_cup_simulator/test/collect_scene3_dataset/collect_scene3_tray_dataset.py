@@ -105,6 +105,8 @@ def load_config(args):
         overrides.setdefault("pointcloud", {})["precheck_required"] = False
     if args.min_roi_points is not None:
         overrides.setdefault("pointcloud", {})["min_roi_points"] = args.min_roi_points
+    if args.no_truth_ik or args.named_pose_mode:
+        overrides.setdefault("expert", {}).setdefault("truth_ik", {})["enabled"] = False
     if args.repeat is not None:
         overrides["episode"]["repeat"] = args.repeat
     if args.max_attempts_per_seed is not None:
@@ -217,11 +219,11 @@ class Scene3TrayDatasetCollector:
             if not expert.close_gripper():
                 raise RuntimeError("CLAW_FAILED: close command returned false")
 
-            observer.publish_stage("extract")
-            expert.extract_tray()
-
             observer.publish_stage("lift")
             expert.lift_tray()
+
+            observer.publish_stage("extract")
+            expert.extract_tray()
 
             observer.publish_stage("stow")
             expert.move_to_waist_stow()
@@ -462,6 +464,8 @@ def build_arg_parser():
     parser.add_argument("--preset-only", action="store_true", help="move to pregrasp only, then stop")
     parser.add_argument("--no-delete-failed-bag", action="store_true", help="keep failed bag files")
     parser.add_argument("--assume-at-shelf", action="store_true", help="skip the interactive shelf-front readiness confirmation")
+    parser.add_argument("--no-truth-ik", action="store_true", help="disable truth IK; use named poses for all stages")
+    parser.add_argument("--named-pose-mode", action="store_true", help="alias for --no-truth-ik")
     return parser
 
 

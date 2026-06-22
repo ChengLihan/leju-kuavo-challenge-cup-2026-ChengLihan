@@ -393,6 +393,26 @@ class Scene3TrayGraspExpert:
         if "scene3_ready_pose" in self.poses:
             self.move_to_named_pose("scene3_ready_pose", stage="pregrasp")
         self.move_to_pregrasp()
+        self.zero_hand_roll()
+
+    def zero_hand_roll(self, duration=0.8):
+        import rospy
+        if self.arm_hold is None:
+            return
+        current = self._read_current_arm_degrees(timeout=5.0)
+        target = list(current)
+        target[13] = 0.0
+        steps = max(1, int(round(float(duration) * float(self.expert_cfg.get("arm_command_hz", 100.0)))))
+        rate = rospy.Rate(float(self.expert_cfg.get("arm_command_hz", 100.0)))
+        for step in range(steps + 1):
+            if rospy.is_shutdown():
+                break
+            alpha = float(step) / float(steps)
+            point = [current[i] + (target[i] - current[i]) * alpha for i in range(14)]
+            self.arm_hold.set_degrees(point)
+            if step < steps:
+                rate.sleep()
+        rospy.sleep(0.15)
 
     def move_to_pregrasp(self):
         if self._truth_ik_enabled():
@@ -501,18 +521,46 @@ class Scene3TrayGraspExpert:
         )
         current = self._read_current_arm_radians(timeout=float(self.truth_ik_cfg.get("timeout_sec", 20.0)))
         locked_other = list(current[:7]) if self.active_arm == "right" else list(current[7:14])
-        move_arm_ik_once(
-            runtime=runtime,
-            active_arm=self.active_arm,
-            active_pos=target["pos"],
-            locked_other_arm_joints=locked_other,
-            active_quat=target["quat"],
-            label=f"scene3_{stage}",
-            constraint_mode=int(self.truth_ik_cfg.get("constraint_mode", IK_MODE_THREE_POINT_MIXED)),
-            pos_cost_weight=float(self.truth_ik_cfg.get("pos_cost_weight", 2.0)),
-            move_time=float(target["duration"]),
-            settle_time=float(self.truth_ik_cfg.get("settle_time", 0.2)),
-        )
+
+        active_pos = target["pos"]
+        active_quat = target["quat"]
+        constraint_mode = int(self.truth_ik_cfg.get("constraint_mode", IK_MODE_THREE_POINT_MIXED))
+        ik_label = f"scene3_{stage}"
+        try:
+            move_arm_ik_once(
+                runtime=runtime,
+                active_arm=self.active_arm,
+                active_pos=active_pos,
+                locked_other_arm_joints=locked_other,
+                active_quat=active_quat,
+                label=ik_label,
+                constraint_mode=constraint_mode,
+                pos_cost_weight=float(self.truth_ik_cfg.get("pos_cost_weight", 2.0)),
+                move_time=float(target["duration"]),
+                settle_time=float(self.truth_ik_cfg.get("settle_time", 0.2)),
+            )
+        except RuntimeError as exc:
+            pos_mag = math.sqrt(sum(float(v) ** 2 for v in active_pos))
+            print(
+                f"[WARN] truth_ik {stage} IK failed for {self.active_arm} arm "
+                f"pos={[round(float(v), 4) for v in active_pos]} "
+                f"quat={[round(float(v), 4) for v in active_quat]} "
+                f"dist_from_origin={pos_mag:.3f}m | {exc}"
+            )
+            if pos_mag > 0.70:
+                print(
+                    "[WARN] IK target is >0.70m from base_link. "
+                    "The arm may not reach this far. "
+                    "Try: 1) --named-pose-mode, 2) reduce truth_ik stage_offsets in config, "
+                    "3) move robot closer to shelf (--approach-shelf-distance)."
+                )
+            raise RuntimeError(
+                f"IK_FAILED: /ik/two_arm_hand_pose_cmd_srv failed for stage={stage} "
+                f"active_arm={self.active_arm} "
+                f"pos={[round(float(v), 3) for v in active_pos]} "
+                f"quat={[round(float(v), 4) for v in active_quat]} "
+                f"dist_from_origin={pos_mag:.3f}m | original: {exc}"
+            ) from exc
         return True
 
     def _truth_ik_stage_target(self, stage):
@@ -523,11 +571,11 @@ class Scene3TrayGraspExpert:
         target_base = info["target_base_xyz"]
         offsets = self.truth_ik_cfg.get("stage_offsets", {})
         default_offsets = {
-            "pregrasp": {"x": -0.12, "y": 0.0, "z": 0.02, "duration": 2.0},
-            "approach": {"x": -0.05, "y": 0.0, "z": 0.00, "duration": 1.2},
-            "extract_mid": {"x": -0.16, "y": 0.0, "z": 0.00, "duration": 1.0},
-            "extract_out": {"x": -0.28, "y": 0.0, "z": 0.02, "duration": 1.2},
-            "lift": {"x": -0.28, "y": 0.0, "z": 0.10, "duration": 1.0},
+            "pregrasp": {"x": -0.06, "y": 0.0, "z": 0.08, "duration": 2.0},
+            "approach": {"x": -0.02, "y": 0.0, "z": 0.06, "duration": 1.2},
+            "lift": {"x": 0.00, "y": 0.0, "z": 0.12, "duration": 0.8},
+            "extract_mid": {"x": -0.12, "y": 0.0, "z": 0.12, "duration": 1.2},
+            "extract_out": {"x": -0.22, "y": 0.0, "z": 0.12, "duration": 1.4},
         }
         stage_offset = dict(default_offsets.get(stage, {}))
         stage_offset.update(offsets.get(stage, {}))

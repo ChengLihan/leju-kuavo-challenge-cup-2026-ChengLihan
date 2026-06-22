@@ -67,30 +67,30 @@ expert:
     quat_xyzw: [0.0, -0.70682518, 0.0, 0.70738827]
     stage_offsets:
       pregrasp:
-        x: -0.12
+        x: -0.23
         y: 0.00
-        z: 0.02
+        z: 0.08
         duration: 2.0
       approach:
-        x: -0.05
-        y: 0.00
-        z: 0.00
-        duration: 1.2
-      extract_mid:
         x: -0.16
         y: 0.00
-        z: 0.00
-        duration: 1.0
-      extract_out:
-        x: -0.28
-        y: 0.00
-        z: 0.02
+        z: 0.08
         duration: 1.2
       lift:
-        x: -0.28
+        x: 0.00
         y: 0.00
-        z: 0.10
-        duration: 1.0
+        z: 0.14
+        duration: 0.8
+      extract_mid:
+        x: -0.25
+        y: 0.00
+        z: 0.14
+        duration: 1.2
+      extract_out:
+        x: -0.40
+        y: 0.00
+        z: 0.14
+        duration: 1.4
   shelf_avoidance:
     enabled: true
     pregrasp_waypoints:
@@ -98,12 +98,12 @@ expert:
       - upper_tray_pregrasp
     approach_waypoints:
       - upper_tray_edge_approach
+    lift_waypoints:
+      - upper_tray_lift
     extract_waypoints:
       - upper_tray_extract_mid
       - upper_tray_extract_out
       - upper_tray_post_extract_clearance
-    lift_waypoints:
-      - upper_tray_lift
     stow_waypoints:
       - upper_tray_shelf_clearance
       - waist_stow_pose

@@ -31,51 +31,51 @@ poses:
 
   upper_tray_avoidance_high:
     left: [20, 0, 0, -30, 0, 0, 0]
-    right: [8, -12, 0, -55, 0, 28, 0]
+    right: [10, 18, 35, -120, 38, -5, 0]
     duration: 2.0
-    description: "High standoff waypoint before entering the rack opening."
+    description: "Retracted waypoint leading into pregrasp, hand_roll=0."
 
   upper_tray_pregrasp:
     left: [20, 0, 0, -30, 0, 0, 0]
-    right: [10, -20, 0, -80, 0, 20, 0]
+    right: [15, 20, 42, -136, 43, -10, 0]
     duration: 3.0
-    description: "Right gripper in front of the upper tray edge."
+    description: "Pregrasp with hand_roll=0, hand near tray from IK-proven posture."
 
   upper_tray_edge_approach:
     left: [20, 0, 0, -30, 0, 0, 0]
-    right: [9, -24, 0, -88, 0, 18, 0]
-    duration: 1.4
-    description: "Slow approach to the tray front edge."
+    right: [-1, 20, 33, -124, 34, -13, 0]
+    duration: 1.8
+    description: "Named-pose fallback for approach, hand_roll=0."
+
+  upper_tray_lift:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [-2, 17, 29, -100, 26, -18, 35]
+    duration: 0.8
+    description: "Pre-extract lift: raise tray before pulling back."
 
   upper_tray_extract_mid:
     left: [20, 0, 0, -30, 0, 0, 0]
-    right: [9, -16, 0, -80, 0, 16, 0]
+    right: [8, 14, 32, -112, 32, -22, 30]
     duration: 1.2
-    description: "Tray partially extracted from rack."
+    description: "Pull tray partially out after lifting."
 
   upper_tray_extract_out:
     left: [20, 0, 0, -30, 0, 0, 0]
-    right: [8, -8, 0, -70, 0, 12, 0]
+    right: [18, 12, 36, -118, 36, -24, 28]
     duration: 1.4
-    description: "Tray horizontally extracted out of rack."
+    description: "Pull tray fully out of rack."
 
   upper_tray_post_extract_clearance:
     left: [18, 0, 0, -34, 0, 0, 0]
-    right: [8, -6, 0, -58, 0, 22, 0]
+    right: [16, 10, 34, -110, 34, -20, 28]
     duration: 1.2
-    description: "Move the gripped tray upward/outward after clearing the shelf lip."
-
-  upper_tray_lift:
-    left: [18, 0, 0, -34, 0, 0, 0]
-    right: [8, -8, 0, -60, 0, 18, 0]
-    duration: 1.2
-    description: "Slight lift after extraction."
+    description: "Clear shelf lip after extraction."
 
   upper_tray_shelf_clearance:
     left: [14, 0, 0, -38, 0, 0, 0]
-    right: [9, -3, 0, -50, 0, 24, 0]
+    right: [12, 8, 28, -100, 28, -15, 30]
     duration: 1.4
-    description: "Clear rack pillars/rails before moving tray toward the waist."
+    description: "Clear rack pillars before moving to waist."
 
   waist_stow_pose:
     left: [10, 0, 0, -40, 0, 0, 0]
