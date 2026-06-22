@@ -1,0 +1,84 @@
+joint_order:
+  - l_arm_pitch
+  - l_arm_roll
+  - l_arm_yaw
+  - l_forearm_pitch
+  - l_hand_yaw
+  - l_hand_pitch
+  - l_hand_roll
+  - r_arm_pitch
+  - r_arm_roll
+  - r_arm_yaw
+  - r_forearm_pitch
+  - r_hand_yaw
+  - r_hand_pitch
+  - r_hand_roll
+
+active_arm: right
+
+poses:
+  safe_home:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [20, 0, 0, -30, 0, 0, 0]
+    duration: 2.0
+    description: "Standing safe pose, arms neutral."
+
+  scene3_ready_pose_lower:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [10, -14, 0, -45, 0, 0, 0]
+    duration: 2.0
+    description: "Ready — arm slightly forward-right, forearm moderately bent."
+
+  lower_tray_avoidance_high:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [10, -14, 0, -40, 0, 0, 0]
+    duration: 2.0
+    description: "Under shelf — same arm_roll, less forearm bend for reach."
+
+  lower_tray_pregrasp:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [12, -14, 0, -35, 0, 0, 0]
+    duration: 3.0
+    description: "Extend — mild arm_pitch increase, forearm straighter."
+
+  lower_tray_edge_approach:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [14, -14, 0, -30, 0, 0, 0]
+    duration: 1.8
+    description: "Final approach — arm_pitch max, forearm nearly straight for max reach."
+
+  upper_tray_lift:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [-2, 17, 29, -100, 26, -18, 35]
+    duration: 0.8
+    description: "Pre-extract lift: raise tray before pulling back."
+
+  upper_tray_extract_mid:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [8, 14, 32, -112, 32, -22, 30]
+    duration: 1.2
+    description: "Pull tray partially out after lifting."
+
+  upper_tray_extract_out:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [18, 12, 36, -118, 36, -24, 28]
+    duration: 1.4
+    description: "Pull tray fully out of rack."
+
+  upper_tray_shelf_clearance:
+    left: [14, 0, 0, -38, 0, 0, 0]
+    right: [12, 8, 28, -100, 28, -15, 30]
+    duration: 1.4
+    description: "Clear rack pillars before moving to waist."
+
+  waist_stow_pose:
+    left: [10, 0, 0, -40, 0, 0, 0]
+    right: [10, 0, 0, -60, 0, 10, 0]
+    duration: 2.0
+    description: "Tray held around waist/chest transport zone."
+
+  finish_hold_pose:
+    left: [10, 0, 0, -40, 0, 0, 0]
+    right: [10, 0, 0, -60, 0, 10, 0]
+    duration: 0.8
+    description: "Final stable hold."

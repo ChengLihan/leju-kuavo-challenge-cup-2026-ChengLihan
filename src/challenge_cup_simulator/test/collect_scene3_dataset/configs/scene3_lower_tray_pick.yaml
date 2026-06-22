@@ -1,0 +1,101 @@
+# Scene3 lower tray pick pipeline config
+
+scene:
+  name: scene3
+  use_existing_sim: true
+
+navigation:
+  approach_shelf_distance: 1.35
+  max_forward_speed_shelf: 0.12
+  approach_timeout_sec: 20.0
+  approach_done_tolerance_m: 0.03
+  settle_after_nav_sec: 1.0
+  force_open_loop: false
+  base_position_topic: /state_estimate/base/pos_xyz
+  base_yaw_topic: /state_estimate/base/angular_zyx
+
+squat:
+  height_delta: -0.25
+  duration: 2.0
+  stand_duration: 2.0
+
+bend:
+  angle_deg: 20
+  height_delta: -0.25
+  squat_duration: 2.0
+  bend_duration: 2.0
+  stand_duration: 2.0
+  rise_duration: 2.0
+  step_back_distance: 0.30
+  step_back_speed: 0.10
+
+episode:
+  topic_wait_timeout_sec: 20.0
+  launch_timeout_sec: 120.0
+  settle_before_record_sec: 0.6
+  settle_after_stow_sec: 1.0
+
+robot:
+  active_arm: right
+  use_both_arms: false
+  head_yaw_deg: 0.0
+  head_pitch_deg: -15.0
+
+expert:
+  pose_config: configs/scene3_lower_tray_named_poses.yaml
+  arm_command_topic: /kuavo_arm_traj
+  arm_target_topic: /kuavo_arm_target_poses
+  arm_command_hz: 100.0
+  arm_mode_service: /arm_traj_change_mode
+  external_control_mode: 2
+  restore_arm_mode_on_success: false
+  auto_swing_mode: 1
+  publish_arm_target_poses: false
+  truth_ik:
+    enabled: false
+  shelf_avoidance:
+    enabled: true
+    pregrasp_waypoints:
+      - lower_tray_avoidance_high
+      - lower_tray_pregrasp
+    approach_waypoints:
+      - lower_tray_edge_approach
+    extract_waypoints:
+      - upper_tray_extract_mid
+      - upper_tray_extract_out
+    stow_waypoints:
+      - upper_tray_shelf_clearance
+      - waist_stow_pose
+      - finish_hold_pose
+  gripper:
+    backend: joint_state
+    joint_command_topic: /gripper/command
+    leju_command_topic: /leju_claw_command
+    leju_service: /control_robot_leju_claw
+    command_hz: 100.0
+    open_position: 0.0
+    close_position: 255.0
+    leju_open_position: 10.0
+    leju_close_position: 90.0
+    velocity: 90.0
+    effort: 1.0
+    close_wait_sec: 0.5
+
+topics:
+  rgb: /cam_h/color/image_raw/compressed
+  depth: /cam_h/depth/image_raw/compressedDepth
+  camera_info: /cam_h/color/camera_info
+  sensors: /sensors_data_raw
+  claw_state: /leju_claw_state
+  tf: /tf
+  tf_static: /tf_static
+  cmd_vel: /cmd_vel
+  head_command: /robot_head_motion_data
+
+success:
+  target_tray_name: smt_tray_2
+  active_scene_xml: src/challenge_cup_simulator/models/biped_s52/xml/_scene_scene3_active.xml
+  max_gripper_tray_distance_m: 0.30
+  gripper_reference_frame: base_link
+  active_gripper_frame: zarm_r7_end_effector
+  gripper_tf_timeout_sec: 1.0
