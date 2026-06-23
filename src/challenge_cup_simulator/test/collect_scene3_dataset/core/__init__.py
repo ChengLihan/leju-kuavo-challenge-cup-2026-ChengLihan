@@ -13,4 +13,4 @@ from .config_loader import deep_update, load_yaml, dump_yaml, ensure_repo_relati
 from .named_poses import NamedPose, load_named_poses, DEFAULT_JOINT_ORDER, ARM_JOINT_NAMES
 from .arm_controller import ArmTrajHold
 from .gripper_controller import JointStateGripperHold, LejuClawCommandClient
-from .grasp_params import GraspParams, UPPER_PARAMS, LOWER_PARAMS
+from .grasp_params import GraspParams, UPPER_PARAMS, LOWER_PARAMS, TRAY_POSITIONS

@@ -54,26 +54,24 @@ class Scene3TrayGraspExpert:
         self.leju_client = LejuClawCommandClient(self.gripper_cfg, self.active_arm)
         self._arm_pub = None
         self._target_pub = None
+        self._pregrasp_ee_quat = None  # captured after pregrasp IK, used for approach
+        self._pregrasp_ee_pos = None   # captured after pregrasp, for TF verify
+        self._safe_home_radians = None  # cached safe_home arm joint rad values
 
     # ── Plan / introspection ─────────────────────────────────────────
 
     def print_plan(self):
         print("Scene3 upper-tray expert plan (v2):")
         if self.truth_ik_cfg.get("enabled", False):
-            print("  truth_ik  → enabled: pregrasp/approach/extract/lift from live /mujoco/qpos + IK")
+            print("  truth_ik  → pregrasp + approach from live /mujoco/qpos + IK")
         for stage, pose_name in self.plan_steps():
             pose = self.poses[pose_name]
             print(f"  {stage:14s} → {pose_name:24s} {pose.duration:.2f}s  {pose.joints_deg}")
 
     def plan_steps(self):
         steps = [("reset", "safe_home")]
-        if "scene3_ready_pose" in self.poses:
-            steps.append(("pregrasp", "scene3_ready_pose"))
         steps.extend(("pregrasp", n) for n in self._waypoints("pregrasp_waypoints", ["upper_tray_pregrasp"]))
         steps.extend(("approach", n) for n in self._waypoints("approach_waypoints", ["upper_tray_edge_approach"]))
-        steps.extend(("extract", n) for n in self._waypoints("extract_waypoints", ["upper_tray_extract_mid", "upper_tray_extract_out"]))
-        steps.extend(("lift",    n) for n in self._waypoints("lift_waypoints",    ["upper_tray_lift"]))
-        steps.extend(("stow",    n) for n in self._waypoints("stow_waypoints",    ["waist_stow_pose", "finish_hold_pose"]))
         return steps
 
     # ── ROS setup / teardown ─────────────────────────────────────────
@@ -194,37 +192,18 @@ class Scene3TrayGraspExpert:
         self.publish_head_target()
         self.open_gripper()
         self.move_to_named_pose("safe_home", stage="pregrasp")
-        if "scene3_ready_pose" in self.poses:
-            self.move_to_named_pose("scene3_ready_pose", stage="pregrasp")
+        # Cache safe_home arm rad values for IK locked-arm constraint
+        import rospy; rospy.sleep(0.5)
+        self._safe_home_radians = self._read_current_arm_radians(timeout=5.0)
         self.move_to_pregrasp()
-        self.zero_hand_roll()
-
-    def zero_hand_roll(self, duration=0.8):
-        import rospy
-
-        if self.arm_hold is None:
-            return
-        current = self._read_current_arm_degrees(timeout=5.0)
-        target = list(current)
-        target[13] = 0.0  # r_hand_roll → index 13
-        hz = float(self.expert_cfg.get("arm_command_hz", 100.0))
-        steps = max(1, int(round(float(duration) * hz)))
-        rate = rospy.Rate(hz)
-        for step in range(steps + 1):
-            if rospy.is_shutdown():
-                break
-            alpha = float(step) / float(steps)
-            point = [current[i] + (target[i] - current[i]) * alpha for i in range(14)]
-            self.arm_hold.set_degrees(point)
-            if step < steps:
-                rate.sleep()
-        rospy.sleep(0.15)
 
     # ── High-level motion stages ─────────────────────────────────────
 
     def move_to_pregrasp(self):
         if self._truth_ik_enabled():
-            return self._move_truth_ik_stage("pregrasp")
+            result = self._move_truth_ik_stage("pregrasp")
+            self._capture_ee_orientation()  # save orientation for approach
+            return result
         return self._move_waypoints("pregrasp_waypoints", ["upper_tray_pregrasp"], stage="pregrasp")
 
     def approach_tray_edge(self):
@@ -232,24 +211,15 @@ class Scene3TrayGraspExpert:
             return self._move_truth_ik_stage("approach")
         return self._move_waypoints("approach_waypoints", ["upper_tray_edge_approach"], stage="approach")
 
-    def extract_tray(self):
-        if self._truth_ik_enabled():
-            self._move_truth_ik_stage("extract_mid")
-            self._move_truth_ik_stage("extract_out")
-            return True
-        return self._move_waypoints("extract_waypoints",
-                                     ["upper_tray_extract_mid", "upper_tray_extract_out"],
-                                     stage="extract")
-
     def lift_tray(self):
+        """Lift tray 15cm straight up from approach position, preserving orientation."""
         if self._truth_ik_enabled():
             return self._move_truth_ik_stage("lift")
         return self._move_waypoints("lift_waypoints", ["upper_tray_lift"], stage="lift")
 
-    def move_to_waist_stow(self):
-        return self._move_waypoints("stow_waypoints",
-                                     ["waist_stow_pose", "finish_hold_pose"],
-                                     stage="stow")
+    def stow_tray(self):
+        """Move tray to chest/waist stow position."""
+        return self.move_to_named_pose("waist_stow_pose", stage="stow")
 
     # ── Named-pose motion ────────────────────────────────────────────
 
@@ -305,11 +275,14 @@ class Scene3TrayGraspExpert:
         return bool(self.truth_ik_cfg.get("enabled", False))
 
     def _move_truth_ik_stage(self, stage):
+        import rospy
+
         if SCENE2_IK_DIR not in sys.path:
             sys.path.insert(0, SCENE2_IK_DIR)
         from scene2_part_grasp_ik import GraspRuntime, move_arm_ik_once
 
         target = self._truth_ik_stage_target(stage)
+        self._ik_stage = stage  # signal to _execute_ik_motion
         runtime = GraspRuntime(
             world_to_ee_offset_x=0.0,
             world_to_ee_offset_y_left=0.0,
@@ -333,7 +306,17 @@ class Scene3TrayGraspExpert:
         )
 
         current = self._read_current_arm_radians(timeout=float(self.truth_ik_cfg.get("timeout_sec", 20.0)))
-        locked_other = list(current[:7]) if self.active_arm == "right" else list(current[7:14])
+        # Use cached safe_home values for non-active arm (avoids stale sensor reads)
+        if self._safe_home_radians is not None:
+            if self.active_arm == "right":
+                locked_other = list(self._safe_home_radians[:7])
+            else:
+                locked_other = list(self._safe_home_radians[7:14])
+        else:
+            if self.active_arm == "right":
+                locked_other = list(current[:7])
+            else:
+                locked_other = list(current[7:14])
 
         active_pos = target["pos"]
         active_quat = target["quat"]
@@ -369,34 +352,78 @@ class Scene3TrayGraspExpert:
         return True
 
     def _truth_ik_stage_target(self, stage):
-        checker = Scene3SuccessChecker(self.cfg)
-        info = checker.measure_target_gripper_distance(
-            timeout=float(self.truth_ik_cfg.get("timeout_sec", 20.0)))
-        target_base = info["target_base_xyz"]
         offsets = self.truth_ik_cfg.get("stage_offsets", {})
         default_offsets = {
-            "pregrasp":    {"x": -0.06, "y": 0.0, "z": 0.08, "duration": 2.0},
-            "approach":    {"x": -0.02, "y": 0.0, "z": 0.06, "duration": 1.2},
-            "lift":        {"x":  0.00, "y": 0.0, "z": 0.12, "duration": 0.8},
-            "extract_mid": {"x": -0.12, "y": 0.0, "z": 0.12, "duration": 1.2},
-            "extract_out": {"x": -0.22, "y": 0.0, "z": 0.12, "duration": 1.4},
+            "pregrasp": {"x": -0.30, "y": 0.0, "z": 0.10, "duration": 2.0},
+            "approach": {"x": -0.10, "y": 0.05, "z": 0.00, "duration": 2.0},
+            "lift":     {"x": 0.0, "y": 0.0, "z": 0.30, "duration": 1.5},
         }
         stage_offset = dict(default_offsets.get(stage, {}))
         stage_offset.update(offsets.get(stage, {}))
-        pos = [
-            float(target_base[0]) + float(stage_offset.get("x", 0.0)),
-            float(target_base[1]) + float(stage_offset.get("y", 0.0)),
-            float(target_base[2]) + float(stage_offset.get("z", 0.0)),
-        ]
-        quat = [float(v) for v in self.truth_ik_cfg.get("quat_xyzw",
-                                                          [0.0, -0.70682518, 0.0, 0.70738827])]
+
+        if stage in ("approach", "lift") and self._pregrasp_ee_pos is not None and self._pregrasp_ee_quat is not None:
+            # Pure translation from pregrasp: preserve Y, Z (or Z+lift), preserve orientation
+            pregrasp_offset_x = float((offsets.get("pregrasp") or default_offsets["pregrasp"]).get("x", -0.30))
+            stage_offset_x = float(stage_offset.get("x", -0.02))
+            stage_offset_z = float(stage_offset.get("z", 0.0))
+            dx = stage_offset_x - pregrasp_offset_x
+            dz = stage_offset_z
+            pos = [self._pregrasp_ee_pos[0] + dx,
+                   self._pregrasp_ee_pos[1],
+                   self._pregrasp_ee_pos[2] + dz]
+            quat = list(self._pregrasp_ee_quat)
+            import rospy
+            rospy.loginfo("truth_ik %s: from_pregrasp_ee=%s dx=%.3f dz=%.3f ik_pos=%s quat=%s",
+                          stage, [round(float(v), 3) for v in self._pregrasp_ee_pos],
+                          dx, dz, [round(float(v), 3) for v in pos],
+                          [round(float(v), 4) for v in quat])
+        else:
+            # Fallback: read tray position from /mujoco/qpos
+            checker = Scene3SuccessChecker(self.cfg)
+            info = checker.measure_target_gripper_distance(
+                timeout=float(self.truth_ik_cfg.get("timeout_sec", 20.0)))
+            target_base = info["target_base_xyz"]
+            pos = [
+                float(target_base[0]) + float(stage_offset.get("x", 0.0)),
+                float(target_base[1]) + float(stage_offset.get("y", 0.0)),
+                float(target_base[2]) + float(stage_offset.get("z", 0.0)),
+            ]
+            quat = [float(v) for v in self.truth_ik_cfg.get("quat_xyzw",
+                                                              [0.0, -0.70682518, 0.0, 0.70738827])]
+            import rospy
+            rospy.loginfo("truth_ik %s: target_base=%s ik_pos=%s quat=%s",
+                          stage, [round(float(v), 3) for v in target_base],
+                          [round(float(v), 3) for v in pos],
+                          [round(float(v), 4) for v in quat])
+
         duration = float(stage_offset.get("duration", self.truth_ik_cfg.get("move_time", 1.4)))
-        import rospy
-        rospy.loginfo("truth_ik %s: target_base=%s ik_pos=%s quat=%s",
-                      stage, [round(float(v), 3) for v in target_base],
-                      [round(float(v), 3) for v in pos],
-                      [round(float(v), 4) for v in quat])
         return {"pos": pos, "quat": quat, "duration": duration}
+
+    def _capture_ee_orientation(self):
+        """Read zarm_r7_end_effector TF and save its orientation quaternion.
+        This is used to keep orientation constant from pregrasp → approach."""
+        import rospy
+        import tf2_ros
+
+        frame = self.cfg.get("success", {}).get("active_gripper_frame", "zarm_r7_end_effector")
+        parent = "base_link"
+        timeout = 3.0
+        buf = tf2_ros.Buffer()
+        tf2_ros.TransformListener(buf)
+        rospy.sleep(0.5)
+        try:
+            transform = buf.lookup_transform(parent, frame, rospy.Time(0), rospy.Duration(timeout))
+            t = transform.transform.translation
+            r = transform.transform.rotation
+            self._pregrasp_ee_pos = [t.x, t.y, t.z]
+            self._pregrasp_ee_quat = [r.x, r.y, r.z, r.w]
+            rospy.loginfo("captured pregrasp EE: pos=%s quat_xyzw=%s",
+                          [round(float(v), 4) for v in self._pregrasp_ee_pos],
+                          [round(float(v), 4) for v in self._pregrasp_ee_quat])
+        except Exception as exc:
+            rospy.logwarn("failed to capture pregrasp EE TF: %s", exc)
+            self._pregrasp_ee_quat = None
+            self._pregrasp_ee_pos = None
 
     def _execute_ik_motion(self, start_degrees, target_degrees, move_time, settle):
         import rospy
@@ -405,6 +432,8 @@ class Scene3TrayGraspExpert:
             raise RuntimeError("expert.setup_ros() must be called before IK motion")
         start = [float(v) for v in start_degrees]
         target = [float(v) for v in target_degrees]
+        # Orientation preserved via captured pregrasp quaternion (see _truth_ik_stage_target)
+        # No hardcoded wrist overrides — IK handles orientation via the quat constraint
         hz = float(self.expert_cfg.get("arm_command_hz", 100.0))
         steps = max(1, int(round(float(move_time) * hz)))
         rate = rospy.Rate(hz)

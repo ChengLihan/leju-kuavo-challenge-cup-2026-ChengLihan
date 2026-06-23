@@ -80,6 +80,7 @@ def wait_for_topics(topics, timeout):
     import rospy
 
     required = list(dict.fromkeys([topic for topic in topics if topic]))
+    missing = list(required)  # init: assume all missing
     start = time.time()
     while time.time() - start < float(timeout) and not rospy.is_shutdown():
         published = {name for name, _msg_type in rospy.get_published_topics()}
