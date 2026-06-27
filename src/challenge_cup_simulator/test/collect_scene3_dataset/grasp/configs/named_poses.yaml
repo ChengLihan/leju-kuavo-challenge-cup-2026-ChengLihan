@@ -1,0 +1,90 @@
+joint_order:
+  - l_arm_pitch
+  - l_arm_roll
+  - l_arm_yaw
+  - l_forearm_pitch
+  - l_hand_yaw
+  - l_hand_pitch
+  - l_hand_roll
+  - r_arm_pitch
+  - r_arm_roll
+  - r_arm_yaw
+  - r_forearm_pitch
+  - r_hand_yaw
+  - r_hand_pitch
+  - r_hand_roll
+
+active_arm: right
+
+poses:
+  safe_home:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [20, 0, 0, -30, 0, 0, 0]
+    duration: 2.0
+    description: "Standing safe pose."
+
+  scene3_ready_pose:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [14, -10, 0, -55, 0, 14, 0]
+    duration: 2.0
+    description: "Ready pose at shelf-front work position."
+
+  upper_tray_avoidance_high:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [10, 18, 35, -120, 38, -5, 0]
+    duration: 2.0
+    description: "Retracted waypoint leading into pregrasp, hand_roll=0."
+
+  upper_tray_pregrasp:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [15, 20, 42, -136, 43, -10, 0]
+    duration: 3.0
+    description: "Pregrasp with hand_roll=0, hand near tray from IK-proven posture."
+
+  upper_tray_edge_approach:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [-1, 20, 33, -124, 34, -13, 0]
+    duration: 1.8
+    description: "Named-pose fallback for approach, hand_roll=0."
+
+  upper_tray_lift:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [-2, 17, 29, -100, 26, -18, 35]
+    duration: 0.8
+    description: "Pre-extract lift: raise tray before pulling back."
+
+  upper_tray_extract_mid:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [8, 14, 32, -112, 32, -22, 30]
+    duration: 1.2
+    description: "Pull tray partially out after lifting."
+
+  upper_tray_extract_out:
+    left: [20, 0, 0, -30, 0, 0, 0]
+    right: [18, 12, 36, -118, 36, -24, 28]
+    duration: 1.4
+    description: "Pull tray fully out of rack."
+
+  upper_tray_post_extract_clearance:
+    left: [18, 0, 0, -34, 0, 0, 0]
+    right: [16, 10, 34, -110, 34, -20, 28]
+    duration: 1.2
+    description: "Clear shelf lip after extraction."
+
+  upper_tray_shelf_clearance:
+    left: [14, 0, 0, -38, 0, 0, 0]
+    right: [12, 8, 28, -100, 28, -15, 30]
+    duration: 1.4
+    description: "Clear rack pillars before moving to waist."
+
+  waist_stow_pose:
+    left: [10, 0, 0, -40, 0, 0, 0]
+    right: [10, 0, 0, -60, 0, 10, 0]
+    duration: 2.0
+    description: "Tray held around waist/chest transport zone."
+
+  finish_hold_pose:
+    left: [10, 0, 0, -40, 0, 0, 0]
+    right: [10, 0, 0, -60, 0, 10, 0]
+    duration: 0.8
+    description: "Final stable hold before stopping rosbag."
