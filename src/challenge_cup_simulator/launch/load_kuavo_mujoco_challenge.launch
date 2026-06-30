@@ -177,7 +177,7 @@
   <group if="$(arg with_ik)">
     <include file="$(find motion_capture_ik)/launch/ik_node.launch">
       <arg name="robot_version" value="$(arg robot_version)"/>
-      <arg name="model_path" value="$(find challenge_cup_simulator)/models/biped_s52/urdf/drake/biped_v3_arm.urdf"/>
+      <arg name="model_path" value="$(find challenge_cup_simulator)/models/biped_s52/urdf/drake/biped_s52_arm.urdf"/>
     </include>
   </group>
   <group if="$(arg with_mm_ik)">

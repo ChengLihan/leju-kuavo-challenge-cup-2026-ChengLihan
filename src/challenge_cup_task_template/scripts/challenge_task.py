@@ -1245,6 +1245,13 @@ class Scene2Controller:
         self._last_left  = [0.0, 60.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         self._last_right = [0.0, -60.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
+        # ── RL 模型加载（可选） ──
+        self._rl_available = False
+        self._rl_infer = None
+        self._rl_model_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "rl", "models")
+        self._try_load_rl_models()
+
     def _send_arms(self, left=None, right=None):
         """发送双臂命令，保持未指定手臂的 last_known 状态。"""
         if left is not None:
@@ -1315,6 +1322,99 @@ class Scene2Controller:
             lo, hi = limits[prefix + key]
             clamped.append(max(lo, min(hi, joints[i])))
         return clamped
+
+    def _try_load_rl_models(self):
+        """加载 TorchScript 残差RL模型。失败则回退 FK-only。"""
+        import rospy
+        try:
+            import torch
+            residual_path = os.path.join(self._rl_model_dir, "residual_policy.pt")
+            if not os.path.exists(residual_path):
+                rospy.loginfo("[RL] residual_policy.pt 不存在，使用FK-only模式")
+                return
+            self._rl_residual_model = torch.jit.load(residual_path)
+            self._rl_residual_model.eval()
+            self._rl_available = True
+            rospy.loginfo("[RL] 残差RL模型加载成功 (23-dim obs, ±5° residual)")
+        except ImportError:
+            rospy.loginfo("[RL] torch未安装，使用FK-only模式")
+        except Exception as e:
+            rospy.logwarn("[RL] 模型加载失败: %s，使用FK-only模式", e)
+
+    def _build_residual_obs(self, arm, fk_joints_deg, target_xyz, target_class):
+        """构建 23-dim 观测 — 精确匹配训练环境。
+
+        EE 计算方法与训练完全一致:
+          ee = zarm_X7_link_world + R_link × (0, 0, -0.17) - base_link_world
+        不使用 TF 的 end_effector 帧（该帧含额外 base_mount 旋转偏移）。
+        """
+        import rospy, tf.transformations as tft
+        current = np.array(
+            self._last_left if arm == "left" else self._last_right, dtype=np.float32)
+        fk_joints = np.array(fk_joints_deg, dtype=np.float32)
+        arm_qpos_rad = np.deg2rad(current).astype(np.float32)
+        fk_target_rad = np.deg2rad(fk_joints).astype(np.float32)
+        target_pos = np.array(target_xyz, dtype=np.float32)
+
+        # EE via zarm_X7_link + R × (0,0,-0.17) — matches training exactly
+        ee_pos = np.zeros(3, dtype=np.float32)
+        link_frame = "zarm_l7_link" if arm == "left" else "zarm_r7_link"
+        EE_LOCAL = np.array([0.0, 0.0, -0.17], dtype=np.float32)
+        try:
+            tf_link = self._perception._tf_buffer.lookup_transform(
+                "base_link", link_frame, rospy.Time(0), rospy.Duration(0.3))
+            t = tf_link.transform.translation
+            r = tf_link.transform.rotation
+            link_pos = np.array([t.x, t.y, t.z])
+            quat = [r.x, r.y, r.z, r.w]
+            R = tft.quaternion_matrix(quat)[:3, :3]
+            ee_pos = (link_pos + R @ EE_LOCAL).astype(np.float32)
+        except Exception:
+            ee_pos = self._estimate_ee_position(arm, current).astype(np.float32)
+
+        gripper_q = np.float32(0.0)
+
+        part_onehot = np.zeros(2, dtype=np.float32)
+        class_map = {"screwdriver": 0, "pipe_clamp": 1, "pipe_fitting": 2}
+        pidx = class_map.get(target_class, 0)
+        if pidx < 2:
+            part_onehot[pidx] = 1.0
+
+        obs = np.concatenate([
+            arm_qpos_rad,           # 7  current joint angles (rad)
+            fk_target_rad,          # 7  FK target joint angles (rad)
+            target_pos - ee_pos,    # 3  relative vector (noisy YOLO → EE)
+            ee_pos,                 # 3  EE position = link + R*offset
+            [gripper_q],            # 1  gripper driver position (rad)
+            part_onehot,            # 2  part class one-hot
+        ]).astype(np.float32)
+        return obs
+
+    def _estimate_ee_position(self, arm, joints_deg):
+        """用简化几何估算末端执行器在base_link系下的位置。
+        与 _compute_arm_to_target 使用相同的运动学参数。"""
+        import math
+        shoulder_z = 0.394
+        shoulder_y = -0.255 if arm == "right" else 0.255
+
+        pitch = math.radians(joints_deg[0])
+        roll  = math.radians(joints_deg[1])
+        forearm = math.radians(joints_deg[3])
+        wrist_pitch = math.radians(joints_deg[5])
+
+        # 简化: 只用 pitch + forearm 估算 EE 位置
+        L1, L2 = 0.32, 0.35
+        total_pitch = pitch + forearm + wrist_pitch
+        # 末端相对肩部
+        ee_x = L1 * math.cos(pitch) + L2 * math.cos(pitch + forearm)
+        ee_z_shoulder = -(L1 * math.sin(pitch) + L2 * math.sin(pitch + forearm))
+        ee_y = shoulder_y + (L1 + L2) * math.sin(roll) * 0.2  # 粗糙近似
+
+        ee_x_base = ee_x
+        ee_y_base = ee_y
+        ee_z_base = shoulder_z + ee_z_shoulder - 0.17  # -0.17 = EE offset
+
+        return np.array([ee_x_base, ee_y_base, ee_z_base], dtype=np.float32)
 
     def _compute_arm_to_target(self, bx, by, bz, arm="right", z_offset=0.15):
         """根据 base_link 目标计算手臂关节角。
@@ -2038,6 +2138,124 @@ class Scene2Controller:
         self._sleep_hold(2.0)
 
     # ═══════════════════════════════════════════════════════
+    # RL 辅助抓取（Route B + Route A 组合）
+    # ═══════════════════════════════════════════════════════
+
+    def _pick_place_with_rl(self, target_class, bx, by, bz, arm=None):
+        """RL辅助版抓取-放置: FK规划 + 残差RL修正 + 自适应夹爪策略。
+        如果RL模型不可用，回退到原始FK-only流程。
+
+        Args:
+            target_class: "pipe_fitting" / "pipe_clamp" / "screwdriver"
+            bx, by, bz: 物体在 base_link 下的坐标
+            arm: 指定手臂，None则按Y自动选臂
+        Returns:
+            bool: True=成功
+        """
+        import rospy
+        import math
+        import numpy as np
+
+        if arm is None:
+            arm = "left" if by > 0 else "right"
+
+        if not self._rl_available:
+            # 回退到原始方法
+            rospy.loginfo("[RL] 模型不可用，使用FK-only抓取")
+            return self._pick_place_original(target_class, bx, by, bz, arm)
+
+        rospy.loginfo("[RL] %s臂 RL辅助抓取 %s (%.3f,%.3f,%.3f)",
+                      arm, target_class, bx, by, bz)
+
+        # ═══ Phase 1: FK规划（不变） ═══
+        plan = self._plan_top_down_grasp(bx, by, bz, arm)
+        if plan is None:
+            fallback = "right" if arm == "left" else "left"
+            rospy.loginfo("[RL] %s臂规划失败, 切换%s臂", arm, fallback)
+            arm = fallback
+            plan = self._plan_top_down_grasp(bx, by, bz, arm)
+            if plan is None:
+                rospy.logerr("[RL] 双臂均无法生成top-down抓取规划!")
+                return False
+
+        # ═══ Phase 2: 越顶 + 桌面避障（不变） ═══
+        self._robot.control_gripper(0, arm)
+        rospy.sleep(0.2)
+
+        rospy.loginfo("[RL BinClear] %s臂 越顶避箱", arm)
+        self._move_arm_slow(arm, plan["bin_clear_joints"], duration=1.5, steps=4)
+        self._sleep_hold(0.3)
+
+        rospy.loginfo("[RL Guard] %s臂 桌面避障高位", arm)
+        self._move_arm_slow(arm, plan["guard_joints"], duration=2.0, steps=6)
+        self._sleep_hold(0.3)
+
+        # ═══ Phase 3: Approach — FK + 残差RL修正（单轮，±3°） ═══
+        rospy.loginfo("[RL Approach] %s臂 逼近+RL残差修正", arm)
+        self._move_arm_slow(arm, plan["approach_joints"], duration=1.5, steps=4)
+        self._sleep_hold(0.3)
+
+        # 残差RL：单轮修正（23-dim obs, 匹配 v2 训练环境）
+        corrected_joints = list(plan["approach_joints"])
+        obs = self._build_residual_obs(arm, corrected_joints, [bx, by, bz], target_class)
+
+        residual = np.zeros(7, dtype=np.float32)
+        try:
+            import torch
+            with torch.no_grad():
+                obs_t = torch.from_numpy(obs.reshape(1, -1)).float()
+                residual = self._rl_residual_model(obs_t)[0].cpu().numpy().flatten()
+        except Exception as e:
+            rospy.logwarn("[RL] 残差推理失败: %s", e)
+
+        MAX_DEPLOY = 3.0
+        res_deg = [np.clip(math.degrees(float(r)), -MAX_DEPLOY, MAX_DEPLOY) for r in residual]
+        corrected_joints = [
+            corrected_joints[j] + res_deg[j] for j in range(7)
+        ]
+        corrected_joints = self._clamp_joints(corrected_joints, arm)
+
+        rospy.loginfo("[RLResid] %s臂 残差=%s 修正=%s",
+                      arm,
+                      ", ".join(f"{v:+.1f}°" for v in res_deg),
+                      ", ".join(f"{v:.1f}°" for v in corrected_joints))
+        self._send_arms(**{arm: corrected_joints})
+        rospy.sleep(0.3)
+
+        # ═══ Phase 4: Descend — 垂直下探 ═══
+        rospy.loginfo("[RL Descend] %s臂 下探抓取点", arm)
+        self._move_arm_slow(arm, plan["grasp_joints"], duration=1.2, steps=3)
+        self._sleep_hold(0.3)
+
+        # ═══ Phase 5: 夹爪闭合（固定 85%） ═══
+        rospy.loginfo("[RL Grasp] %s臂 闭合到 85%%", arm)
+        self._robot.control_gripper(85, arm)
+        rospy.sleep(0.6)
+        self._sleep_hold(0.3)
+
+        # ═══ Phase 6: Lift + Place（不变） ═══
+        rospy.loginfo("[RL Lift] %s臂 抬起物体", arm)
+        self._move_arm_slow(arm, corrected_joints, duration=1.5, steps=4)
+        self._sleep_hold(0.4)
+
+        # 使用现有放置流程
+        rospy.loginfo("[RL Place] %s臂 放置 %s 到对应箱子", arm, target_class)
+        self._place_object_in_bin(target_class, arm, bz=bz)
+
+        rospy.loginfo("[RL] %s臂 %s 抓取放置完成", arm, target_class)
+        return True
+
+    def _pick_place_original(self, target_class, bx, by, bz, arm=None):
+        """回退到原始FK-only抓取（RL不可用时）。"""
+        if target_class == "pipe_fitting":
+            return self._pick_place_pipe_fitting(bx, by, bz, arm)
+        elif target_class == "pipe_clamp":
+            return self._pick_place_pipe_clamp(bx, by, bz, arm)
+        elif target_class == "screwdriver":
+            return self._pick_place_screwdriver(bx, by, bz, arm)
+        return False
+
+    # ═══════════════════════════════════════════════════════
     # 各物体类型专用抓取流程
     # ═══════════════════════════════════════════════════════
 
@@ -2320,11 +2538,20 @@ class Scene2Controller:
 
         # ═══ Phase 2: 首次检测 — 收集所有类别物体位置 ═══
         TARGET_CLASSES = ["pipe_fitting", "pipe_clamp", "screwdriver"]
-        PICK_FUNCTIONS = {
-            "pipe_fitting": self._pick_place_pipe_fitting,
-            "pipe_clamp":  self._pick_place_pipe_clamp,
-            "screwdriver": self._pick_place_screwdriver,
-        }
+        # RL模型可用时优先使用RL辅助抓取
+        if self._rl_available:
+            rospy.loginfo("[RL] 使用RL辅助抓取模式")
+            PICK_FUNCTIONS = {
+                "pipe_fitting": lambda bx, by, bz, arm=None: self._pick_place_with_rl("pipe_fitting", bx, by, bz, arm),
+                "pipe_clamp":  lambda bx, by, bz, arm=None: self._pick_place_with_rl("pipe_clamp", bx, by, bz, arm),
+                "screwdriver": lambda bx, by, bz, arm=None: self._pick_place_with_rl("screwdriver", bx, by, bz, arm),
+            }
+        else:
+            PICK_FUNCTIONS = {
+                "pipe_fitting": self._pick_place_pipe_fitting,
+                "pipe_clamp":  self._pick_place_pipe_clamp,
+                "screwdriver": self._pick_place_screwdriver,
+            }
         self._sleep_hold(0.5)
         self._perception.republish_viz()
 
